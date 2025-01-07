@@ -1,2 +1,2 @@
-# F.R.E.D
+# F.R.E.D.
 Personal Assistant
