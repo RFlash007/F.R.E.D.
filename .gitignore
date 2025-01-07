@@ -1,0 +1,51 @@
+# Ignore large files
+*.exe
+*.onnx
+*.json
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Backup files
+*.bak
+*.old
+*.orig
+*.tmp
+*.~*
+
+# Compressed files
+*.zip
+*.tar.gz
+*.7z
+*.rar
+*.gz
+*.tgz
+# Bytecode and cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+env/
+*.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Test results
+coverage/
+*.cover
+*.coverage
+*.coverage.*
+
+# Distribution files
+dist/
+build/
+*.egg-info/
