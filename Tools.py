@@ -14,13 +14,13 @@ def get_time()->str:
 
 def quick_learn(topics) -> str:
     """
-    Learn about anything from DuckDuckGo.
+    Learn about anything from DuckDuckGo with search.
 
     Args:
-        topic (str): The topic to learn about.
+        topics (str): The topics to learn about
 
     Returns:
-        str: Various information about the topic from DuckDuckGo
+        str: Curated information about the topics from multiple sources
     """
     #If the user provides a topic use it if not use default topics
     ddgs = DDGS()
@@ -43,7 +43,6 @@ def quick_learn(topics) -> str:
     #set settings for duckduckgo search
     region = "us-en"
     safesearch = "off"
-    max_results = 1
 
     #News and Text Search for all topics
     search_results = []
@@ -53,32 +52,43 @@ def quick_learn(topics) -> str:
             keywords=topic,
             region=region,
             safesearch=safesearch,
-            max_results=max_results
+            max_results=2
         ))
         news_results.extend(ddgs.news(
             keywords=topic,
             region=region,
             safesearch=safesearch,
-            max_results=max_results
+            max_results=1
         ))
 
-    #Prompt for AI to summarize the DuckDuckGo search results
-    summary_query = (f"You are a web search information summarizer, your job is to get as much information in a very concise format\n"
-                     f"Here are the results: Text Results:\n{search_results}\n\nNews Results:\n{news_results}")
+    #Summarize the text
+    text_summary_prompt = f"You are a information summarizer, include every detail of the text results but make it as concise as possible. Return just the summary, no other text. Here is the information to summarize: {search_results}"
+    #Summarize the news
+    news_summary_prompt = f"You are a information summarizer, include every detail of the news results but make it as concise as possible. Return just the summary, no other text. Here is the information to summarize: {news_results}"
 
+   
     #Storing non Summary of info in case AI fails to generate summary
-    bare_info = (f"Text Results:\n{search_results}\n\nNews Results:\n{news_results}")
+    bare_info = (f"\nText Results: {search_results}\nNews Results: {news_results}")
 
-    # Use AI to summarize all info
+    #Summarize the text
     try:
-        response = ddgs.chat(
-            keywords=summary_query,
+        text_response = ddgs.chat(
+            keywords=text_summary_prompt,
             model="gpt-4o-mini",  # or "claude-3-haiku", "llama-3.1-70b", etc.
             timeout=60           # optional, defaults to 30 seconds
         )
     except Exception as e:
         return bare_info
-    return response
+    try:
+        news_response = ddgs.chat(
+            keywords=news_summary_prompt,
+            model="gpt-4o-mini",  # or "claude-3-haiku", "llama-3.1-70b", etc.
+            timeout=60           # optional, defaults to 30 seconds
+        )
+    except Exception as e:
+        return bare_info
+    
+    return f"\nText Summary: {text_response}\nNews Summary: {news_response}"
 
 def verify_memories() -> str:
     """
@@ -97,10 +107,11 @@ def verify_memories() -> str:
         Ensure that the following information is in the required format. Re-write the data in the required format if it is not correct.
         If there are no errors, simply return all the original data in the required format. **Include NO extra dialogue or text** — only return the data in the correct format.
         Here is the required format:
-        fact: information
-        fact: information
-        fact: information
-        
+        • [PERSONAL] John is allergic to peanuts
+        • [PREFERENCE] John prefers tea over coffee
+        • [TECHNICAL] Python was created by Guido van Rossum
+        • [LOCATION] John lives in Seattle
+
         Here is the data:
         {content}
         """
@@ -112,43 +123,31 @@ def verify_memories() -> str:
         # If LLM returns a string:
         file.write(response["message"]["content"])
         file.truncate()
-
+    print("Semantic Verification Complete")
     # 2) Verify EPISODIC.TXT
     with open("Episodic.txt", 'r+', encoding='utf-8') as file:
         content = file.read()
 
-        episodic_verification_prompt = f"""You are a database verification bot. Your task is to verify the formatting of data in a database.
-        Ensure that the following information is in the required format. Re-write the data in the required format if it is not correct.
-        If there are no errors, simply return all the original data in the required format. **Include NO extra dialogue or text** — only return the data in the correct format.
+        episodic_verification_prompt = """You are a database verification bot. Verify and reformat the following memory entries.
+        Required format for each memory.
+        1. **IF THERE IS ANY EXTRA TEXT OR DIALOGUE, REMOVE IT**
+        2. **RETURN ONLY THE RESULT**
+        3. **WRITE NO EXTRA TEXT OR DIALOGUE**
+
+        REQUIRED FORMAT:       
+        [
+            "timestamp": "YYYY-MM-DD HH:MM",
+            "tags": ["tag1", "tag2"],
+            "summary": "Brief conversation summary",
+            "insights": {
+                "positive": "What worked well",
+                "negative": "What to improve",
+                "learned": "Key learnings"
+            }
+        ]\n\n(Another memory)\n\n(Another memory) etc...
         
-        Here is the required JSON format (example):
-        
-        {{
-          "memory_timestamp": "03 January 2025",
-          "context_tags": [
-            "raspberry-pi-discussion",
-            "project-guidance",
-            "hardware-acquisition"
-          ],
-          "conversation_summary": "User recently acquired a Raspberry Pi...",
-          "what_worked": "Discussing multiple project setup options kept the conversation productive.",
-          "what_to_avoid": "Clarify ambiguous inputs like 'q' to avoid confusion.",
-          "what_you_learned": "User prefers hands-on learning and is interested in beginner-friendly projects."
-        }}
-        
-        {{
-          "memory_timestamp": "04 January 2025",
-          "context_tags": [
-            "RaspberryPiProjects",
-            "HandsOnLearning"
-          ],
-          "conversation_summary": "User discussed setting up projects...",
-          ...
-        }}
-        
-        Here is the data:
-        {content}
-        """
+        Here is the data to verify:
+        """ + content
 
         messages = [{"role": "user", "content": episodic_verification_prompt}]
         response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=messages)
@@ -158,6 +157,7 @@ def verify_memories() -> str:
         file.write(response["message"]["content"])
         file.truncate()
     # (e.g., try to parse the JSON, check for certain keys).
+    print("Episodic Verification Complete")
     return "Memory Verification was a Success"
 
 def get_system_status() -> str:

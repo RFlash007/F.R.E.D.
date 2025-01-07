@@ -9,6 +9,7 @@ import Episodic
 from ChatUI import ChatUI
 import threading
 #from Transcribe import initialize_voice_system
+from queue import Queue
 PINK = '\033[95m'
 CYAN = '\033[96m'
 YELLOW = '\033[93m'
@@ -21,6 +22,9 @@ available_functions = {
     'verify_memories': Tools.verify_memories,
     'system_status': Tools.get_system_status
 }
+MAX_CONVERSATION_LENGTH = 10  # or whatever number makes sense
+voice_queue = Queue()
+
 def process_message(user_input):
     """Process a single message and return the response"""
     episodic_memories = Episodic.recall_episodic(user_input)
@@ -75,12 +79,18 @@ def process_message(user_input):
     print(user_prompt)
     response_content = response['message']['content']
     conversation.append({"role": "assistant", "content": response_content})
-
+    
+    # Trim conversation if it gets too long
+    if len(conversation) > MAX_CONVERSATION_LENGTH:
+        conversation.pop(0)  # Remove oldest message
+    
     #remove asterisks from the response
     response_content = response_content.replace('*', '')
+
+    #if voice is enabled, add the response to the voice queue
     
-    # Handle voice in a separate thread to not block the UI
-    #threading.Thread(target=Voice.piper_speak, args=(response_content,), daemon=True).start()
+    voice_queue.put(response_content)
+    threading.Thread(target=process_voice_queue, daemon=True).start()
     
     return response_content
 
@@ -128,6 +138,12 @@ def summarize(input):
     response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=blankConvo)
     print(response['message']['content'])
     return response['message']['content']
+
+def process_voice_queue():
+    while True:
+        message = voice_queue.get()
+        Voice.piper_speak(message)
+        voice_queue.task_done()
 
 if __name__ == "__main__":
     #create the model with new prompt

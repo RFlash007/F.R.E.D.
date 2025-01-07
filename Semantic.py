@@ -2,114 +2,135 @@ import ollama
 import Episodic
 import os
 import torch
+import logging
 
 accessed_memories = []
 def open_file(filepath):
     with open(filepath, 'r', encoding='utf-8') as infile:
         return infile.read()
 
-def create_semantic(memory):
-    semantic_memory_prompt = f"""
-    You are an expert in fact learning from conversations. I need you to review this conversation summary and provide a list of the facts that are learned from the conversation.\n 
-    The facts written should just be knowledge facts, not a summary of the conversation.\n
-    You do not need to write any reference of time or date unless it's relevant to the facts, for example: fact: Donald Trump was re-elected in **2024**.\n
-    here is the format I want the list of facts to be in:\n
-    fact: Users name is Ian\n
-    fact: assistant's name is FRED\n
-    fact: Mars is a planet\n
-    Conversation Summary:\n
-    {memory}
+def create_semantic(memory: str) -> None:
     """
-    blankConvo = [{"role": "user", "content": semantic_memory_prompt}]
+    Extracts factual information from conversations and stores it in a simple format.
+    """
+    fact_extraction_prompt = f"""Extract factual information from this conversation.
 
-    # Initiate streaming chat response
-    response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=blankConvo)
+    CONVERSATION:
+    {memory}
 
-    # Store the result
-    if "message" in response and "content" in response["message"]:
-        semantic_memory = response["message"]["content"]
+    INSTRUCTIONS:
+    - Extract only verifiable facts and knowledge
+    - Ignore conversation flow, timestamps, or contextual details
+    - Each fact should be self-contained and complete
+    - Format: "• [CATEGORY] fact"
+    
+    Example format:
+    • [PERSONAL] John is allergic to peanuts
+    • [PREFERENCE] John prefers tea over coffee
+    • [TECHNICAL] Python was created by Guido van Rossum
+    • [LOCATION] John lives in Seattle
+    """
+
+    response = ollama.chat(
+        model="huihui_ai/qwen2.5-abliterate:14b", 
+        messages=[{"role": "user", "content": fact_extraction_prompt}]
+    )
+
+    if response["message"]["content"]:
         with open("Semantic.txt", 'a', encoding='utf-8') as file:
-            file.write(f"\n{semantic_memory}")
+            file.write(f"\n{response['message']['content']}")
 
+def update_semantic(conversation: str) -> None:
+    """
+    Updates semantic memory by consolidating and deduplicating facts.
+    """
+    fact_update_prompt = f"""Review and update these facts based on new information.
 
-def recall_semantic(user_input):
-    # Load vault content and split by double newlines
-    vault_path = "Semantic.txt"
-    if not os.path.exists(vault_path):
-        print("No Episodic.txt found.")
+    NEW CONVERSATION:
+    {conversation}
+
+    EXISTING FACTS:
+    {accessed_memories}
+
+    INSTRUCTIONS:
+    1. Compare new facts with existing ones
+    2. Remove duplicates
+    3. Resolve conflicts (keep most recent/accurate)
+    4. Combine related facts when possible
+    5. Use format: "• [CATEGORY] fact"
+    6. Return ONLY the final, consolidated list of facts.
+    
+    Return ONLY the final, consolidated list of facts."""
+
+    try:
+        # Get updated facts from LLM
+        response = ollama.chat(
+            model="huihui_ai/qwen2.5-abliterate:14b",
+            messages=[{"role": "user", "content": fact_update_prompt}]
+        )
+        
+        if response["message"]["content"]:
+            updated_facts = [response["message"]["content"]]
+            
+            # Update file with consolidated facts
+            with open("Semantic.txt", 'r+', encoding='utf-8') as file:
+                content = file.read()
+                existing_facts = [fact.strip() for fact in content.split("\n") if fact.strip()]
+                preserved_facts = [fact for fact in existing_facts if fact not in accessed_memories]
+                
+                # Write updated content
+                file.seek(0)
+                file.write("\n".join(preserved_facts + updated_facts))
+                file.truncate()
+                
+    except Exception as e:
+        logging.error(f"Error updating semantic memory: {str(e)}")
+        raise
+
+def recall_semantic(query: str, top_k: int = 2) -> list:
+    """
+    Retrieves relevant facts based on a query using semantic search.
+    
+    Args:
+        query (str): The search query
+        top_k (int): Number of facts to return
+    
+    Returns:
+        list: Most relevant facts
+    """
+    if not os.path.exists("Semantic.txt"):
         return []
 
-    content = open_file(vault_path)
-    vault_content = [chunk.strip() for chunk in content.split("\n") if chunk.strip()]
-
-    # Generate embeddings for each chunk
-    vault_embeddings = []
-    for chunk in vault_content:
-        response = ollama.embeddings(model='nomic-embed-text', prompt=chunk)
-        vault_embeddings.append(response["embedding"])
-
-    # Convert embeddings to a tensor
-    vault_embeddings_tensor = torch.tensor(vault_embeddings)
-
-    # Retrieve best matching context
     try:
-        relevant_memories = Episodic.get_relevant_context(user_input, vault_embeddings_tensor, vault_content, top_k=2)
-        for memory in relevant_memories:
-            accessed_memories.append(memory)
+        # Load and preprocess facts
+        content = open_file("Semantic.txt")
+        facts = [fact.strip() for fact in content.split("\n") if fact.strip()]
+
+        # Generate embeddings
+        fact_embeddings = []
+        for fact in facts:
+            response = ollama.embeddings(model='nomic-embed-text', prompt=fact)
+            fact_embeddings.append(response["embedding"])
+
+        # Convert to tensor for efficient computation
+        fact_embeddings_tensor = torch.tensor(fact_embeddings)
+        
+        # Get query embedding
+        query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
+        query_embedding = torch.tensor(query_response["embedding"])
+
+        # Calculate similarities
+        similarities = torch.cosine_similarity(query_embedding.unsqueeze(0), fact_embeddings_tensor)
+        
+        # Get top-k most relevant facts
+        top_k_indices = torch.argsort(similarities, descending=True)[:top_k]
+        relevant_facts = [facts[idx] for idx in top_k_indices]
+        
+        # Add to accessed memories
+        accessed_memories.extend(relevant_facts)
+        
+        return relevant_facts
+
     except Exception as e:
-        print("Error retrieving context:", str(e))
-        relevant_memories = []
-    return relevant_memories
-
-
-def update_semantic(conversation):
-    """
-    Updates Semantic memories based on a conversation summary.
-
-    :param conversation: A string containing the conversation summary.
-    :return: None. Updates the file 'Semantic.txt' in-place.
-    """
-    # Step 1: Prompt the model with the conversation summary + existing facts
-    memory_update_prompt = f"""Using the following conversation summary:
-
-    {conversation}
-    
-    Carefully review the existing facts below and **only make changes** if the new information from the summary **requires** it.
-    Do not remove valid information unless it is contradicted by the summary.
-    If additional details should be added, integrate them in a way that preserves the format.
-    Consolidate the memories where you can, if two or more facts can be combined into one, do so.
-    Return only what is requested nothing more. If there is any extra dialogue outside of the requested format remove it.
-    for example: fact: Users name is Ian\n
-    fact: assistant's name is FRED\n
-    fact: Mars is a planet\n
-    
-    **Existing Memory**:
-    {accessed_memories}
-    """
-
-    messages = [{"role": "user", "content": memory_update_prompt}]
-    response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=messages)
-
-    # Step 2: Store the single updated memory from the LLM
-    updated_memories = [response["message"]["content"]]
-
-    # Step 3: Read the contents of 'Semantic.txt'
-    with open("Semantic.txt", 'r+', encoding='utf-8') as file:
-        content = file.read()
-        # Split into lines, ignoring any empty lines
-        chunks = [chunk.strip() for chunk in content.split("\n") if chunk.strip()]
-
-        # Step 4: Iterate over each chunk and skip if it exists in accessed_memories
-        updated_content = []
-
-        for chunk in chunks:
-            if chunk not in accessed_memories:
-                updated_content.append(chunk)
-
-        # Now append the updated memory from the LLM
-        updated_content.extend(updated_memories)
-
-        # Step 5: Overwrite 'Semantic.txt' with the updated content
-        file.seek(0)
-        file.write("\n".join(updated_content))
-        file.truncate()
+        logging.error(f"Error in recall_semantic: {str(e)}")
+        return []

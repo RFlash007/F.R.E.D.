@@ -1,3 +1,4 @@
+import logging
 import os
 import torch
 import ollama
@@ -65,49 +66,63 @@ def recall_episodic(input):
 
     return relevant_context
 
-def create_memory(conversation):
-    # Get time for timestamp in prompt
-    current_time = time.time()  # Get current UNIX timestamp
-    conversation_date = time.strftime("%d %B %Y", time.localtime(current_time))
-
-    # Use double braces to ensure Python doesn't interpret as format specifiers
-    reflection_prompt_template = f"""
-    You are creating a memory from the perspective of the Assistant Fred in this conversation summary. The conversation occurred on {conversation_date}. If you do not have enough information for a field, use "N/A". Write one concise sentence per field. Focus on information that will be useful in future interactions. Include context_tags that are specific and reusable. Provide a memory_timestamp.
-    
-    Output valid JSON in this exact format (no extra text):
-
-    {{
-      "memory_timestamp": "string",
-      "context_tags": [
-        "string",
-        "..."
-      ],
-      "conversation_summary": "string",
-      "what_worked": "string",
-      "what_to_avoid": "string",
-      "what_you_learned": "string"
-    }}
-    Conversation Summary:
-    {conversation}
+def create_memory(conversation: str) -> str:
     """
+    Creates a memory entry from a conversation.
+    
+    Args:
+        conversation: The conversation text to analyze
+        
+    Returns:
+        str: The created memory entry in JSON format
+    """
+    try:
+        current_time = time.time()
+        conversation_date = time.strftime("%d %B %Y", time.localtime(current_time))
 
-    blankConvo = [{"role": "user", "content": reflection_prompt_template}]
+    # Note: Using f-string instead of concatenation and fixing the curly brace issue
+        reflection_prompt_template = f"""
+        You are creating a memory from the perspective of the Assistant Fred in this conversation summary. The conversation occurred on {conversation_date}. If you do not have enough information for a field, use "N/A". Write one concise sentence per field. Focus on information that will be useful in future interactions. Include context_tags that are specific and reusable. Provide a memory_timestamp.
+        
+        Output valid JSON in this exact format and nothing else **WRITE NO OTHER TEXT OR DIALOGUE**:
 
-    # Initiate streaming chat response
-    response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=blankConvo)
+            [
+                "timestamp": "YYYY-MM-DD HH:MM",
+                "tags": ["tag1", "tag2"],
+                "summary": "Brief conversation summary",
+                "insights": {{
+                    "positive": "What worked well",
+                    "negative": "What to improve",
+                    "learned": "Key learnings"
+                }}
+            ]
 
-    # Store the result
-    if "message" in response and "content" in response["message"]:
+        Conversation Summary:
+        {conversation}"""
+
+        response = ollama.chat(
+            model="huihui_ai/qwen2.5-abliterate:14b", 
+            messages=[{"role": "user", "content": reflection_prompt_template}]
+        )
+
+        if not response.get("message", {}).get("content"):
+            print("Error: No content in memory creation response")
+            return ""
+
         episodic_content = response["message"]["content"]
         Semantic.create_semantic(episodic_content)
+        
         with open("Episodic.txt", 'a', encoding='utf-8') as file:
             file.write(f"\n\n{episodic_content}")
+            
         return episodic_content
-    else:
-        print("No content returned from the model.")
+        
+    except Exception as e:
+        print(f"Error creating memory: {e}")
+        return ""
 
 
-def update_episodic(conversation):
+def update_episodic(conversation_summary):
     """
     Updates Episodic memories based on a conversation summary.
 
@@ -116,43 +131,58 @@ def update_episodic(conversation):
     """
     #array to hold altered memories
     updated_memories = []
-    memory_update_prompt = f"""Using the following conversation summary:
-    \n
-    {conversation}
-    \n
-    You are given multiple memory objects. Carefully review them **all at once** and only make changes if the new information from the summary requires it.
-    Do not remove valid information unless it is contradicted by the summary.
-    If additional details should be added, integrate them in a way that preserves the JSON structure and property names.
-    If you find that two or more memories contain overlapping or redundant information, **consolidate** them into a single memory, retaining all relevant details. 
-    If there is any extra dialogue outside of the requested format remove it.
+    memory_update_prompt = f"""Review and update these memory entries based on the new conversation.
 
-    **Existing Memories**:
-    {accessed_memories}
+    NEW CONVERSATION:
+    """ + conversation_summary + """
+
+    EXISTING MEMORIES:
+    """ + "\n\n".join(str(mem) for mem in accessed_memories) + """
+
+    INSTRUCTIONS:
+    1. Compare new conversation with existing memories
+    2. Update only if new information conflicts or adds value
+    3. Merge overlapping memories
+    4. Keep JSON format:
+    5. **WRITE NO OTHER TEXT OR DIALOGUE**
+    [
+        "timestamp": "YYYY-MM-DD HH:MM",
+        "tags": ["tag1", "tag2"],
+        "summary": "Brief conversation summary",
+        "insights": {
+            "positive": "What worked well",
+            "negative": "What to improve",
+            "learned": "Key learnings"
+        }
+    ]
     """
 
-    #get updated episodic memories
-    messages = [{"role": "user", "content": memory_update_prompt}]
-    response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=messages)
+    try:
+        # Get updated memories from LLM
+        messages = [{"role": "user", "content": memory_update_prompt}]
+        response = ollama.chat(
+            model="huihui_ai/qwen2.5-abliterate:14b", 
+            messages=messages
+        )
 
-    updated_memories.append(response["message"]["content"])
+        if not response["message"]["content"]:
+            logging.warning("No content returned from LLM")
+            return
 
-    # Step 3: Read the contents of 'Semantic.txt'
-    with open("Episodic.txt", 'r+', encoding='utf-8') as file:
-        content = file.read()
-        # Split into lines, ignoring any empty lines
-        chunks = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
+        updated_memories = [response["message"]["content"]]
 
-        # Step 4: Iterate over each chunk and skip if it exists in accessed_memories
-        updated_content = []
+        # Update file with consolidated memories
+        with open("Episodic.txt", 'r+', encoding='utf-8') as file:
+            # Read and filter existing content
+            content = file.read()
+            chunks = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
+            preserved_chunks = [chunk for chunk in chunks if chunk not in accessed_memories]
+            
+            # Write updated content
+            file.seek(0)
+            file.write("\n\n".join(preserved_chunks + updated_memories))
+            file.truncate()
 
-        for chunk in chunks:
-            if chunk not in accessed_memories:
-                updated_content.append(chunk)
-
-        # Now append the updated memory from the LLM
-        updated_content.extend(updated_memories)
-
-        # Step 5: Overwrite 'Semantic.txt' with the updated content
-        file.seek(0)
-        file.write("\n\n".join(updated_content))
-        file.truncate()
+    except Exception as e:
+        logging.error(f"Error updating episodic memory: {str(e)}")
+        raise
