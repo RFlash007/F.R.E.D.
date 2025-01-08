@@ -1,3 +1,4 @@
+import os
 import ollama
 #from typing import List
 import time
@@ -89,6 +90,12 @@ def quick_learn(topics) -> str:
         return bare_info
     
     return f"\nText Summary: {text_response}\nNews Summary: {news_response}"
+
+def news(user_input) -> str:
+    """
+    Get the news from the user input
+    """
+    return quick_learn(user_input)
 
 def verify_memories() -> str:
     """
@@ -201,11 +208,39 @@ def get_system_status() -> str:
             
     return report
 
+def create_project(user_input) -> str:
+    """
+    Create a new project
+
+    Args:
+        project_name (str): The name of the project to create
+
+    Returns:
+       (str): A message stating whether the project was created successfully or not.
+    """
+    #Get the project name from the user input
+    prompt = f"""1. Get the project name from this messasge
+                 2. **ONLY RETURN THE PROJECT NAME NO OTHER TEXT OR DIALOGUE**
+                 For example if the user says "Create a project called 'My Project'" return "My Project"
+                Message: {user_input}"""
+    messages = [{"role": "user", "content": prompt}]
+    response = ollama.chat(model="llama3.2:3b", messages=messages)
+    project_name = response["message"]["content"]
+
+    try:
+        os.chdir('Projects')
+        os.mkdir(project_name)
+        os.chdir('..')
+    except Exception as e:
+        return f"Failed to create project: {e}"
+    return f"Project {project_name} created"
 # Map function names to actual functions
 available_functions = {
     'quick_learn': quick_learn,
     'verify_memories': verify_memories,
-    'get_system_status': get_system_status
+    'get_system_status': get_system_status,
+    'create_project': create_project,
+    'news': news
 }
 
 def handle_tool_calls(response, user_input):
@@ -239,5 +274,13 @@ def handle_tool_calls(response, user_input):
             return verify_memories()
         elif function_name == 'get_system_status':
             return get_system_status()
+        elif function_name == 'create_project':
+            return create_project(user_input)
+        elif function_name == 'news':
+            try:
+                learned_data = function_to_call(user_input)
+                return learned_data
+            except Exception as e:
+                print("Failed to learn")
         else:
             print(f"Unhandled function: {function_name}")

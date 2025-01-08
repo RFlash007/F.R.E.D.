@@ -8,14 +8,20 @@ import queue
 import threading
 import time
 from datetime import datetime
-import torch
 import Voice
+import torch
+from shared_resources import voice_queue
 
 # Silence warnings
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 class VoiceTranscriber:
     def __init__(self, callback_function):
+        self.silence_threshold = 0.0018  # Adjust based on your microphone
+        self.silence_duration = 1.0    # Seconds of silence to mark end of speech
+        self.last_speech_time = time.time()
+        self.speech_buffer = []
+        
         self.callback = callback_function
         self.wake_words = ["fred", "hey fred", "okay fred"]
         self.stop_words = ["goodbye", "bye fred", "stop listening"]
@@ -60,46 +66,73 @@ class VoiceTranscriber:
                 audio_data = self.audio_queue.get()
                 audio_data = audio_data.flatten().astype(np.float32)
 
-                try:
-                    segments, _ = self.model.transcribe(
-                        audio_data, 
-                        language="en",
-                        beam_size=5,
-                        word_timestamps=True
-                    )
+                # Calculate audio level
+                audio_level = np.abs(audio_data).mean()
+                print(f"\rAudio level: {audio_level:.4f}", end="")
 
-                    for segment in segments:
-                        text = segment.text.strip().lower()
-                        if text:
-                            timestamp = datetime.now().strftime("%H:%M:%S")
+                # Only process audio if level is above threshold
+                if audio_level > 0.0018:
+                    try:
+                        segments, _ = self.model.transcribe(
+                            audio_data, 
+                            language="en",
+                            beam_size=5,
+                            word_timestamps=True
+                        )
+
+                        for segment in segments:
+                            text = segment.text.strip().lower()
+                            if text:
+                                print(f"\nDetected: {text}")
+                                timestamp = datetime.now().strftime("%H:%M:%S")
+                                
+                                # Check for wake words when not listening
+                                if not self.is_listening:
+                                    if any(wake_word in text for wake_word in self.wake_words):
+                                        print(f"\n[{timestamp}] Wake word detected! Listening...")
+                                        Voice.piper_speak("Yes, I'm here.")
+                                        self.is_listening = True
+                                        self.speech_buffer = []
+                                        continue
+
+                                # Process speech while listening
+                                if self.is_listening:
+                                    # Check for stop words
+                                    if any(stop_word in text for stop_word in self.stop_words):
+                                        print(f"\n[{timestamp}] Stop word detected. Going to sleep.")
+                                        Voice.piper_speak("Goodbye for now.")
+                                        self.is_listening = False
+                                        self.speech_buffer = []
+                                        continue
+
+                                    # Process normal conversation
+                                    if len(text) > 3:  # Ignore very short sounds
+                                        self.last_speech_time = time.time()
+                                        self.speech_buffer.append(text)
+
+                    except Exception as e:
+                        print(f"\nError during transcription: {str(e)}")
+                else:
+                    # If audio level is low and we have buffered speech, process it
+                    if self.is_listening and self.speech_buffer and time.time() - self.last_speech_time > self.silence_duration:
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        complete_utterance = " ".join(self.speech_buffer)
+                        print(f"\n[{timestamp}] Processing complete utterance: {complete_utterance}")
+                        self.speech_buffer = []
+                        
+                        # Temporarily stop listening while processing
+                        self.is_listening = False
+                        
+                        # Process the message and get response
+                        response = self.callback(complete_utterance)
+                        
+                        # Wait for voice response to complete
+                        while not voice_queue.empty():
+                            time.sleep(0.1)
                             
-                            # Check for wake words when not listening
-                            if not self.is_listening:
-                                if any(wake_word in text for wake_word in self.wake_words):
-                                    print(f"\n[{timestamp}] Wake word detected! Listening...")
-                                    Voice.piper_speak("Yes, I'm here.")
-                                    self.is_listening = True
-                                    self.current_conversation = []
-                                    continue
-
-                            # Process speech while listening
-                            if self.is_listening:
-                                # Check for stop words
-                                if any(stop_word in text for stop_word in self.stop_words):
-                                    print(f"\n[{timestamp}] Stop word detected. Going to sleep.")
-                                    Voice.piper_speak("Goodbye for now.")
-                                    self.is_listening = False
-                                    self.current_conversation = []
-                                    continue
-
-                                # Process normal conversation
-                                if len(text) > 3:  # Ignore very short sounds
-                                    print(f"[{timestamp}] {text}")
-                                    response = self.callback(text)
-                                    self.current_conversation.append(text)
-
-                except Exception as e:
-                    print(f"Error during transcription: {str(e)}")
+                        # Resume listening after response
+                        self.is_listening = True
+                        print("\nListening for next input...")
 
             time.sleep(0.1)
 

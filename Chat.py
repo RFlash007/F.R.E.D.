@@ -1,15 +1,21 @@
 import ollama
 from duckduckgo_search import DDGS
 import Tools
-#import Transcribe
 import Voice
 import Semantic
 import Procedural
 import Episodic
 from ChatUI import ChatUI
 import threading
-#from Transcribe import initialize_voice_system
 from queue import Queue
+import time
+
+# Move voice_queue to a new file called shared_resources.py
+from shared_resources import voice_queue
+
+# Remove this import to break circular dependency
+# from Transcribe import initialize_voice_system
+
 PINK = '\033[95m'
 CYAN = '\033[96m'
 YELLOW = '\033[93m'
@@ -20,10 +26,9 @@ conversation = []
 available_functions = {
     'quick_learn': Tools.quick_learn,
     'verify_memories': Tools.verify_memories,
-    'system_status': Tools.get_system_status
+    'system_status': Tools.get_system_status    
 }
 MAX_CONVERSATION_LENGTH = 10  # or whatever number makes sense
-voice_queue = Queue()
 
 def process_message(user_input):
     """Process a single message and return the response"""
@@ -52,7 +57,7 @@ def process_message(user_input):
     )
 
     conversation.append({"role": "user", "content": user_prompt})
-    response = ollama.chat(model="Fred", messages=conversation, tools=[Tools.quick_learn, Tools.verify_memories, Tools.get_system_status], stream=False)
+    response = ollama.chat(model="Fred", messages=conversation, tools=[Tools.quick_learn, Tools.verify_memories, Tools.get_system_status, Tools.create_project, Tools.news], stream=False)
     #if tools are needed, handle them
     try:
         tool_answer = Tools.handle_tool_calls(response, user_input)
@@ -95,19 +100,27 @@ def process_message(user_input):
     return response_content
 
 def chat_loop():
+    # Import here to avoid circular dependency
+    from Transcribe import initialize_voice_system
+    
     # Initialize voice system with process_message as callback
-    #voice_system = initialize_voice_system(process_message)
+    voice_system = initialize_voice_system(process_message)
     
     # Initialize UI
     ui = ChatUI(process_message)
     
     try:
-        ui.run()
-    except Exception as e:
-        print("UI Error: ", e)
-    #finally:
-        #voice_system.stop()
+        # Start voice processing in a separate thread
+        voice_thread = threading.Thread(target=voice_system.process_audio, daemon=True)
+        voice_thread.start()
         
+        # Run UI in the main thread
+        ui.run()  # This blocks until window is closed
+            
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+    finally:
+        voice_system.stop()
 
 def summarize(input):
     user_input = f'''
@@ -140,6 +153,7 @@ def summarize(input):
     return response['message']['content']
 
 def process_voice_queue():
+    """Process voice responses in queue"""
     while True:
         message = voice_queue.get()
         Voice.piper_speak(message)
