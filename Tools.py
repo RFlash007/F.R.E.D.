@@ -114,10 +114,10 @@ def verify_memories() -> str:
         Ensure that the following information is in the required format. Re-write the data in the required format if it is not correct.
         If there are no errors, simply return all the original data in the required format. **Include NO extra dialogue or text** — only return the data in the correct format.
         Here is the required format:
-        • [PERSONAL] John is allergic to peanuts
-        • [PREFERENCE] John prefers tea over coffee
-        • [TECHNICAL] Python was created by Guido van Rossum
-        • [LOCATION] John lives in Seattle
+        [PERSONAL] John is allergic to peanuts
+        [PREFERENCE] John prefers tea over coffee
+        [TECHNICAL] Python was created by Guido van Rossum
+        [LOCATION] John lives in Seattle
 
         Here is the data:
         {content}
@@ -229,18 +229,47 @@ def create_project(user_input) -> str:
 
     try:
         os.chdir('Projects')
-        os.mkdir(project_name)
+        os.mkdir(project_name.lower())
         os.chdir('..')
+        return f"Project {project_name.lower()} has beencreated"
     except Exception as e:
         return f"Failed to create project: {e}"
-    return f"Project {project_name} created"
+
+def open_project(user_input) -> str:
+    """
+    Open a project
+
+    Args:
+        project_name (str): The name of the project to open
+
+    Returns:
+       (str): A message stating whether the project was opened successfully or not.
+    """
+    #Get the project name from the user input
+    prompt = f"""1. Get the project name from this messasge
+                 2. **ONLY RETURN THE PROJECT NAME NO OTHER TEXT OR DIALOGUE**
+                 For example if the user says "Open a project called 'My Project'" return "My Project"
+                Message: {user_input}"""
+    messages = [{"role": "user", "content": prompt}]
+    response = ollama.chat(model="llama3.2:3b", messages=messages)
+    project_name = response["message"]["content"]
+
+    try:
+        os.chdir('Projects')
+        with open(project_name.lower(), 'r') as file:
+            content = file.read()
+        return f"Project content {content} has been opened"
+    except Exception as e:
+        return f"Failed to open project: {e}"
+    
 # Map function names to actual functions
 available_functions = {
     'quick_learn': quick_learn,
     'verify_memories': verify_memories,
     'get_system_status': get_system_status,
     'create_project': create_project,
-    'news': news
+    'news': news,
+    'open_project': open_project
 }
 
 def handle_tool_calls(response, user_input):
@@ -276,6 +305,8 @@ def handle_tool_calls(response, user_input):
             return get_system_status()
         elif function_name == 'create_project':
             return create_project(user_input)
+        elif function_name == 'open_project':
+            return open_project(user_input)
         elif function_name == 'news':
             try:
                 learned_data = function_to_call(user_input)

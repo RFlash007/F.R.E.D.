@@ -203,7 +203,7 @@ class ChatUI:
     def _process_message(self, message):
         try:
             response = self.chat_callback(message)
-            self.msg_queue.put(("F.R.E.D", response))
+            self.msg_queue.put(("F.R.E.D.", response))
             self.conversation_history.append({"role": "assistant", "content": response})
             self.status_bar.config(text="Ready")
         except Exception as e:

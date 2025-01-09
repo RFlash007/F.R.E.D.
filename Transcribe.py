@@ -17,7 +17,7 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 class VoiceTranscriber:
     def __init__(self, callback_function):
-        self.silence_threshold = 0.0018  # Adjust based on your microphone
+        self.silence_threshold = 0.0015  # Adjust based on your microphone
         self.silence_duration = 1.0    # Seconds of silence to mark end of speech
         self.last_speech_time = time.time()
         self.speech_buffer = []
@@ -44,6 +44,7 @@ class VoiceTranscriber:
         self.is_listening = False
         self.is_running = False
         self.current_conversation = []
+        self.ui = None  # Add this line to store UI reference
 
     def setup_model(self):
         """Initialize the Whisper model with optimal settings"""
@@ -59,6 +60,10 @@ class VoiceTranscriber:
             print(f"Status: {status}", file=sys.stderr)
         self.audio_queue.put(indata.copy())
 
+    def set_ui(self, ui):
+        """Set the UI instance for displaying transcribed text"""
+        self.ui = ui
+
     def process_audio(self):
         """Process audio stream and detect wake words/commands"""
         while not self.terminate_event.is_set():
@@ -71,7 +76,7 @@ class VoiceTranscriber:
                 print(f"\rAudio level: {audio_level:.4f}", end="")
 
                 # Only process audio if level is above threshold
-                if audio_level > 0.0018:
+                if audio_level > 0.0016:
                     try:
                         segments, _ = self.model.transcribe(
                             audio_data, 
@@ -82,6 +87,11 @@ class VoiceTranscriber:
 
                         for segment in segments:
                             text = segment.text.strip().lower()
+                            # Ignore specific phrases
+                            if text in ["thanks for watching!", "thanks for watching"]:
+                                text = text.replace("thanks for watching!", "")
+                                text = text.replace("thanks for watching", "")
+                                
                             if text:
                                 print(f"\nDetected: {text}")
                                 timestamp = datetime.now().strftime("%H:%M:%S")
@@ -90,6 +100,8 @@ class VoiceTranscriber:
                                 if not self.is_listening:
                                     if any(wake_word in text for wake_word in self.wake_words):
                                         print(f"\n[{timestamp}] Wake word detected! Listening...")
+                                        if self.ui:
+                                            self.ui.display_message("F.R.E.D: Yes, I'm here.", "assistant")
                                         Voice.piper_speak("Yes, I'm here.")
                                         self.is_listening = True
                                         self.speech_buffer = []
@@ -100,10 +112,16 @@ class VoiceTranscriber:
                                     # Check for stop words
                                     if any(stop_word in text for stop_word in self.stop_words):
                                         print(f"\n[{timestamp}] Stop word detected. Going to sleep.")
-                                        Voice.piper_speak("Goodbye for now.")
+                                        if self.ui:
+                                            self.ui.display_message(f"Ian: {text}", "user")
+                                        # Process the goodbye through normal flow with UI instance
+                                        response = self.callback("goodbye")  # UI instance included in callback
                                         self.is_listening = False
                                         self.speech_buffer = []
-                                        continue
+                                        # Wait for voice response to complete
+                                        while not voice_queue.empty():
+                                            time.sleep(0.1)
+                                        return  # Exit the process_audio method
 
                                     # Process normal conversation
                                     if len(text) > 3:  # Ignore very short sounds
@@ -118,6 +136,11 @@ class VoiceTranscriber:
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         complete_utterance = " ".join(self.speech_buffer)
                         print(f"\n[{timestamp}] Processing complete utterance: {complete_utterance}")
+                        
+                        # Display the user's complete utterance in the UI
+                        if self.ui:
+                            self.ui.display_message(f"Ian: {complete_utterance}", "user")
+                        
                         self.speech_buffer = []
                         
                         # Temporarily stop listening while processing
@@ -125,6 +148,10 @@ class VoiceTranscriber:
                         
                         # Process the message and get response
                         response = self.callback(complete_utterance)
+
+                        #display the response in the UI
+                        if self.ui:
+                            self.ui.display_message(f"F.R.E.D.: {response}", "assistant")
                         
                         # Wait for voice response to complete
                         while not voice_queue.empty():
@@ -169,7 +196,6 @@ class VoiceTranscriber:
             self.process_thread.join()
             self.is_running = False
             self.is_listening = False
-            print("\nVoice system stopped.")
 
 def initialize_voice_system(callback_function):
     """Initialize and return a voice transcriber instance"""

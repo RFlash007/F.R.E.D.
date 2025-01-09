@@ -9,18 +9,11 @@ from ChatUI import ChatUI
 import threading
 from queue import Queue
 import time
+import sys
 
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
 
-# Remove this import to break circular dependency
-# from Transcribe import initialize_voice_system
-
-PINK = '\033[95m'
-CYAN = '\033[96m'
-YELLOW = '\033[93m'
-NEON_GREEN = '\033[92m'
-RESET_COLOR = '\033[0m'
 conversation = []
 #available tools
 available_functions = {
@@ -30,7 +23,13 @@ available_functions = {
 }
 MAX_CONVERSATION_LENGTH = 10  # or whatever number makes sense
 
-def process_message(user_input):
+def shutdown_app(current_ui):
+    """Cleanly shutdown the application"""
+    if current_ui:
+        current_ui.root.destroy()
+    sys.exit(0)
+
+def process_message(user_input, ui_instance=None):
     """Process a single message and return the response"""
     episodic_memories = Episodic.recall_episodic(user_input)
     semantic_memories = Semantic.recall_semantic(user_input)
@@ -40,10 +39,17 @@ def process_message(user_input):
         summary = summarize(conversation)
         #update the episodic memory and procedural memory
         Procedural.prompt_update(Episodic.create_memory(summary))
+        Semantic.create_semantic(summary)
+        #update the episodic memory
         Episodic.update_episodic(summary)
         #update the semantic memory
         Semantic.update_semantic(summary)
-        return "Goodbye! Fred signing off."
+        if ui_instance:
+            ui_instance.display_message("F.R.E.D.: Goodbye for now.", "assistant")
+            Voice.piper_speak("Goodbye for now.")
+            ui_instance.root.after(2000, lambda: shutdown_app(ui_instance))
+        return None
+
     #create user prompt with no tools
     user_prompt = (
         f"{user_input}\n\n"
@@ -57,7 +63,7 @@ def process_message(user_input):
     )
 
     conversation.append({"role": "user", "content": user_prompt})
-    response = ollama.chat(model="Fred", messages=conversation, tools=[Tools.quick_learn, Tools.verify_memories, Tools.get_system_status, Tools.create_project, Tools.news], stream=False)
+    response = ollama.chat(model="Fred", messages=conversation, tools=[Tools.quick_learn, Tools.verify_memories, Tools.get_system_status, Tools.create_project, Tools.news, Tools.open_project], stream=False)
     #if tools are needed, handle them
     try:
         tool_answer = Tools.handle_tool_calls(response, user_input)
@@ -100,14 +106,13 @@ def process_message(user_input):
     return response_content
 
 def chat_loop():
-    # Import here to avoid circular dependency
     from Transcribe import initialize_voice_system
+    # Initialize UI first
+    ui = ChatUI(lambda msg: process_message(msg, ui))  # Pass UI instance through lambda
     
-    # Initialize voice system with process_message as callback
-    voice_system = initialize_voice_system(process_message)
-    
-    # Initialize UI
-    ui = ChatUI(process_message)
+    # Initialize voice system with process_message callback that includes UI
+    voice_system = initialize_voice_system(lambda msg: process_message(msg, ui))
+    voice_system.set_ui(ui)
     
     try:
         # Start voice processing in a separate thread
@@ -121,6 +126,8 @@ def chat_loop():
         print("\nShutting down...")
     finally:
         voice_system.stop()
+        print("Voice system stopped.")
+        sys.exit(0)  # Ensure complete shutdown
 
 def summarize(input):
     user_input = f'''
@@ -155,9 +162,16 @@ def summarize(input):
 def process_voice_queue():
     """Process voice responses in queue"""
     while True:
-        message = voice_queue.get()
-        Voice.piper_speak(message)
-        voice_queue.task_done()
+        try:
+            message = voice_queue.get()
+            if message:
+                success = Voice.piper_speak(message)
+                if not success:
+                    print("Failed to process speech synthesis")
+            voice_queue.task_done()
+        except Exception as e:
+            print(f"Error processing voice queue: {str(e)}")
+            voice_queue.task_done()  # Make sure to mark task as done even on error
 
 if __name__ == "__main__":
     #create the model with new prompt
