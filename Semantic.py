@@ -1,11 +1,13 @@
-import ollama
-import Episodic
-import os
 import torch
+import ollama
 import logging
 import json
+import os
 from pathlib import Path
-import numpy as np
+from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(level=logging.ERROR)
 
 # Track which facts have been accessed during the current session
 accessed_memories = []
@@ -13,370 +15,404 @@ accessed_memories = []
 # Cache setup for storing embeddings and processed facts
 CACHE_DIR = Path("cache")
 EMBEDDINGS_CACHE = CACHE_DIR / "semantic_embeddings.pt"  # PyTorch tensor cache
-FACTS_CACHE = CACHE_DIR / "facts.json"  # Processed facts cache
+FACTS_FILE = "Semantic.json"  # Processed facts storage
+
+class Fact(BaseModel):
+    """
+    Represents a single factual entry with a category and content.
+    """
+    category: str
+    content: str
+    
+    def to_json(self) -> str:
+        """
+        Convert fact to JSON format.
+        - Replaced .dict() with .model_dump() for Pydantic v2.
+        """
+        return json.dumps(self.model_dump())
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> "Fact":
+        """
+        Create a Fact from a JSON string.
+        - Replaced parse_raw() with model_validate_json() for Pydantic v2.
+        """
+        return cls.model_validate_json(json_str)
 
 def initialize_cache():
-    """Initialize cache directory and files
-    
-    Creates:
-    - cache/ directory if it doesn't exist
-    - semantic_embeddings.pt: stores tensor embeddings and last modified time
-    - facts.json: stores processed fact data
-    """
+    """Initialize cache directory and files."""
     CACHE_DIR.mkdir(exist_ok=True)
     if not EMBEDDINGS_CACHE.exists():
         torch.save({"embeddings": [], "last_modified": 0}, EMBEDDINGS_CACHE)
-    if not FACTS_CACHE.exists():
-        with open(FACTS_CACHE, 'w', encoding='utf-8') as f:
-            json.dump([], f)
+    if not os.path.exists(FACTS_FILE):
+        with open(FACTS_FILE, 'w', encoding='utf-8') as f:
+            pass  # Create empty file if it doesn't exist
 
 def load_cached_embeddings():
-    """Load embeddings from cache if they're up to date
-    
-    Returns:
-        torch.Tensor: Cached embeddings if valid
-        None: If cache is invalid or missing
-    
-    Cache is considered valid if the cache's last_modified timestamp
-    is newer than or equal to Semantic.txt's last modified time
     """
-    semantic_modified = os.path.getmtime("Semantic.txt")
+    Load embeddings from cache if they're up to date.
+    - Use weights_only=True to address future security warnings in torch.load().
+    """
+    semantic_modified = os.path.getmtime(FACTS_FILE)
     try:
-        cache = torch.load(EMBEDDINGS_CACHE, weights_only=True, map_location='cpu')
+        cache = torch.load(EMBEDDINGS_CACHE, map_location='cpu', weights_only=True)
         if cache["last_modified"] >= semantic_modified:
-            return torch.tensor(cache["embeddings"]) if isinstance(cache["embeddings"], list) else cache["embeddings"]
+            if isinstance(cache["embeddings"], list):
+                return torch.tensor(cache["embeddings"])
+            return cache["embeddings"]
     except Exception as e:
         logging.warning(f"Error loading semantic cache: {e}")
     return None
 
 def save_embeddings_cache(embeddings):
-    """Save embeddings to cache
-    
-    Args:
-        embeddings (torch.Tensor): Embedding vectors to cache
-        
-    Saves a dictionary containing:
-        - embeddings: The actual embedding vectors
-        - last_modified: Current timestamp of Semantic.txt
-    """
+    """Save embeddings to cache."""
     try:
         cache_data = {
             "embeddings": embeddings,
-            "last_modified": torch.tensor(os.path.getmtime("Semantic.txt"))
+            "last_modified": os.path.getmtime(FACTS_FILE)
         }
         torch.save(cache_data, EMBEDDINGS_CACHE)
     except Exception as e:
         logging.error(f"Error saving semantic cache: {e}")
 
-def batch_embed_texts(texts, batch_size=5):
-    """Embed multiple texts in batches for efficiency
-    
-    Args:
-        texts (list): List of text chunks to embed
-        batch_size (int): Number of texts to process at once
-        
-    Returns:
-        torch.Tensor: Matrix of embeddings, one per text
+def create_semantic(memory: str) -> str:
     """
-    all_embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        embeddings = [ollama.embeddings(model='nomic-embed-text', prompt=text)["embedding"] 
-                     for text in batch]
-        all_embeddings.extend(embeddings)
-    return torch.tensor(all_embeddings)
-
-def open_file(filepath):
-    """Helper function to read file content with robust encoding handling
-    
-    Args:
-        filepath (str): Path to file to read
-        
-    Returns:
-        str: Content of file
-        
-    Tries UTF-8 first, falls back to other encodings if needed
+    Extract verifiable facts from a conversation and store them in Semantic.json.
     """
-    encodings = ['utf-8', 'latin-1', 'cp1252']
-    
-    for encoding in encodings:
-        try:
-            with open(filepath, 'r', encoding=encoding) as infile:
-                return infile.read()
-        except UnicodeDecodeError:
-            continue
-    
-    # If all encodings fail, try binary read and decode
     try:
-        with open(filepath, 'rb') as infile:
-            content = infile.read()
-            return content.decode('utf-8', errors='ignore')
-    except Exception as e:
-        logging.error(f"Failed to read file {filepath} with any encoding: {e}")
-        return ""
+        fact_extraction_prompt = f"""
+        Extract only verifiable facts and knowledge from the conversation.
+        Return an array of JSON objects where each object has:
+        - "category": short label, e.g. "Education", "Hardware"
+        - "content": the fact
 
-def create_semantic(memory: str) -> None:
-    """Extracts factual information from conversations
-    
-    Args:
-        memory (str): Conversation to extract facts from
-        
-    Process:
-        1. Extracts facts using LLM
-        2. Saves to file
-        3. Invalidates cache
-    """
-    #Extracts factual information from conversations and stores it in a simple format
-    fact_extraction_prompt = f"""Extract factual information from this conversation.
+        DO NOT wrap them in any other JSON keys (like "facts"). Just return the array.
 
-    CONVERSATION:
-    {memory}
+        CONVERSATION:
+        {memory}
+        """
 
-    INSTRUCTIONS:
-    - Extract only verifiable facts and knowledge
-    - Ignore conversation flow, timestamps, or contextual details
-    - Each fact should be self-contained and complete
-    - Format: "• [CATEGORY] fact"
-    
-    Example format:
-    [PERSONAL] John is allergic to peanuts
-    [PREFERENCE] John prefers tea over coffee
-    [TECHNICAL] Python was created by Guido van Rossum
-    [LOCATION] John lives in Seattle
-    """
+        # Use format="json" instead of Fact.schema_json()
+        response = ollama.chat(
+            model="huihui_ai/qwen2.5-abliterate:14b",
+            messages=[{"role": "user", "content": fact_extraction_prompt}],
+            format="json",
+            options={"temperature": 0}
+        )
 
-    response = ollama.chat(
-        model="huihui_ai/qwen2.5-abliterate:14b", 
-        messages=[{"role": "user", "content": fact_extraction_prompt}]
-    )
+        if not response.get("message", {}).get("content"):
+            logging.warning("No content in AI response")
+            return ""
 
-    if response["message"]["content"]:
-        with open("Semantic.txt", 'a', encoding='utf-8') as file:
-            file.write(f"\n{response['message']['content']}")
-        
-        # Invalidate cache by updating last_modified time
+        content = response["message"]["content"]
+
+        try:
+            # Parse the JSON response directly
+            facts_data = json.loads(content)
+            if not isinstance(facts_data, list):
+                facts_data = [facts_data]
+
+            with open(FACTS_FILE, 'a', encoding='utf-8') as file:
+                for data in facts_data:
+                    # Validate presence of keys
+                    if "category" not in data or "content" not in data:
+                        logging.error(f"AI output missing 'category' or 'content': {data}")
+                        continue
+
+                    fact = Fact(category=data["category"], content=data["content"])
+                    file.write(fact.to_json() + "\n")
+
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing JSON: {e}")
+            return ""
+        except Exception as e:
+            logging.error(f"Error processing fact: {e}")
+            return ""
+
+        # Invalidate cache so next recall triggers re-embedding
         if EMBEDDINGS_CACHE.exists():
             save_embeddings_cache([])
 
-def update_semantic(conversation: str) -> None:
-    """Updates semantic memory by consolidating facts
-    
-    Args:
-        conversation (str): New conversation to integrate
-        
-    Process:
-        1. Gets LLM to update accessed facts
-        2. Preserves non-accessed facts
-        3. Saves updated facts
-        4. Invalidates cache
+        return content
+
+    except Exception as e:
+        logging.error(f"Error in create_semantic: {e}")
+        return ""
+
+def update_semantic(conversation: str) -> str:
     """
-    #Updates semantic memory by consolidating and deduplicating facts.
-    fact_update_prompt = f"""Review and update these facts based on new information.
+    Update previously accessed facts based on new conversation input.
+    """
+    try:
+        if not accessed_memories:
+            logging.info("No facts to update")
+            return "No facts accessed for update"
 
-    NEW CONVERSATION:
-    {conversation}
+        updated_facts = []
 
-    EXISTING FACTS:
-    {accessed_memories}
+        # Load existing facts
+        with open(FACTS_FILE, 'r', encoding='utf-8') as file:
+            existing_facts = [Fact.from_json(line) for line in file if line.strip()]
 
-    INSTRUCTIONS:
-    1. Compare new facts with existing ones
-    2. Remove duplicates
-    3. Resolve conflicts (keep most recent/accurate)
-    4. Combine related facts when possible
-    5. Use format: "[CATEGORY] fact"
-    6. Return ONLY the final, consolidated list of facts.
-    
-    Return ONLY the final, consolidated list of facts."""
+        # Process each accessed fact individually
+        for fact_data in accessed_memories:
+            fact = Fact.from_json(fact_data)
+            fact_update_prompt = f"""Review and update this specific fact based on the new conversation json summary.
+Focus only on this fact and integrate any relevant new information.
+
+NEW CONVERSATION:
+{conversation}
+
+CURRENT FACT:
+[{fact.category}] {fact.content}
+
+INSTRUCTIONS:
+1. Update the fact if new information adds value
+2. Remove redundant information, summarizing where it's possible.
+2. Return the updated fact as a JSON object with 'category' and 'content' fields
+"""
+
+            # Use format="json"
+            response = ollama.chat(
+                model="huihui_ai/qwen2.5-abliterate:14b",
+                messages=[{"role": "user", "content": fact_update_prompt}],
+                format="json",
+                options={"temperature": 0}
+            )
+
+            if response.get("message", {}).get("content"):
+                try:
+                    new_data = json.loads(response["message"]["content"])
+                    if "category" not in new_data or "content" not in new_data:
+                        logging.warning(f"AI output missing keys. Keeping original: {new_data}")
+                        updated_facts.append(fact)
+                    else:
+                        updated_fact = Fact(
+                            category=new_data["category"],
+                            content=new_data["content"]
+                        )
+                        updated_facts.append(updated_fact)
+                except json.JSONDecodeError as e:
+                    logging.error(f"JSON decode error for updated fact: {e}")
+                    updated_facts.append(fact)
+            else:
+                logging.warning(f"Failed to update fact: {fact}")
+                updated_facts.append(fact)
+
+        # Update file with preserved (unchanged) + updated facts
+        preserved_facts = [
+            fact for fact in existing_facts
+            if fact.to_json() not in accessed_memories
+        ]
+        with open(FACTS_FILE, 'w', encoding='utf-8') as file:
+            for fact in preserved_facts + updated_facts:
+                file.write(fact.to_json() + "\n")
+
+        try:
+            consolidate_semantic()
+        except Exception as e:
+            logging.error(f"Error consolidating semantic data: {e}")
+
+        # Invalidate cache
+        if EMBEDDINGS_CACHE.exists():
+            save_embeddings_cache([])
+
+        accessed_memories.clear()  # Clear accessed memories after update
+        return f"Successfully updated {len(updated_facts)} facts"
+
+    except Exception as e:
+        logging.error(f"Error updating semantic memory: {e}")
+        return f"Error: {str(e)}"
+
+def batch_embed_texts(texts, batch_size=5):
+    """Embed multiple texts in batches for efficiency."""
+    all_embeddings = []
 
     try:
-        # Get updated facts from LLM
-        response = ollama.chat(
-            model="huihui_ai/qwen2.5-abliterate:14b",
-            messages=[{"role": "user", "content": fact_update_prompt}]
-        )
-        
-        if response["message"]["content"]:
-            updated_facts = [response["message"]["content"]]
-            
-            # Update file with consolidated facts
-            with open("Semantic.txt", 'r+', encoding='utf-8') as file:
-                content = file.read()
-                existing_facts = [fact.strip() for fact in content.split("\n") if fact.strip()]
-                preserved_facts = [fact for fact in existing_facts if fact not in accessed_memories]
-                
-                # Write updated content
-                file.seek(0)
-                file.write("\n".join(preserved_facts + updated_facts))
-                file.truncate()
-            consolidate_memories()
-            # Invalidate cache
-            if EMBEDDINGS_CACHE.exists():
-                save_embeddings_cache([])
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            batch_embeddings = []
 
-                
+            for text in batch:
+                response = ollama.embeddings(model='nomic-embed-text', prompt=text)
+                embedding = response["embedding"]
+                batch_embeddings.append(embedding)
+
+            all_embeddings.extend(batch_embeddings)
+
+        return torch.tensor(all_embeddings)
+
     except Exception as e:
-        logging.error(f"Error updating semantic memory: {str(e)}")
-        raise
+        logging.error(f"Error in batch_embed_texts: {str(e)}")
+        return torch.tensor([])  # Return empty tensor on error
 
 def recall_semantic(query: str, top_k: int = 2) -> list:
-    """Retrieves relevant facts based on a query using semantic search"""
-    if not os.path.exists("Semantic.txt"):
+    """
+    Retrieves relevant facts based on a query using semantic search.
+    """
+    if not os.path.exists(FACTS_FILE):
         return []
 
     try:
         initialize_cache()
-        
+
         # Load and preprocess facts
-        content = open_file("Semantic.txt")
-        facts = [fact.strip() for fact in content.split("\n") if fact.strip()]
-        
-        # Return early if no facts exist
+        with open(FACTS_FILE, 'r', encoding='utf-8') as file:
+            facts = [Fact.from_json(line) for line in file if line.strip()]
+
         if not facts:
             return []
 
         # Try to load cached embeddings
         fact_embeddings_tensor = load_cached_embeddings()
-        
+
         if fact_embeddings_tensor is None or fact_embeddings_tensor.nelement() == 0:
             # Generate new embeddings in batches
-            fact_embeddings_tensor = batch_embed_texts(facts)
+            fact_embeddings_tensor = batch_embed_texts(
+                [f"[{fact.category}] {fact.content}" for fact in facts]
+            )
             save_embeddings_cache(fact_embeddings_tensor)
-        
-        # Verify we have valid embeddings
-        if fact_embeddings_tensor.nelement() == 0:
-            logging.error("No valid embeddings found")
-            return []
-            
+
         # Get query embedding
         query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
         query_embedding = torch.tensor(query_response["embedding"])
 
-        # Calculate similarities using optimized tensor operations
+        # Calculate similarities
         similarities = torch.cosine_similarity(
-            query_embedding.unsqueeze(0), 
+            query_embedding.unsqueeze(0),
             fact_embeddings_tensor
         )
-        
+
         # Get top-k most relevant facts
         top_k = min(top_k, len(similarities))
-        if top_k == 0:
-            return []
-            
         top_k_indices = torch.topk(similarities, top_k).indices
-        relevant_facts = [facts[idx] for idx in top_k_indices]
-        
-        # Track accessed facts
-        accessed_memories.extend(relevant_facts)
-        
+        relevant_facts = [facts[idx].to_json() for idx in top_k_indices]
+
+        # Track accessed facts checking for duplicates
+        for fact in relevant_facts:
+            if fact not in accessed_memories:
+                accessed_memories.append(fact)
+
         return relevant_facts
 
     except Exception as e:
         logging.error(f"Error in recall_semantic: {str(e)}")
         return []
-
-def prune_old_memories(max_memories=1000):
-    """Remove oldest facts when exceeding threshold
     
-    Args:
-        max_memories (int): Maximum number of facts to keep
+
+
+def remove_duplicate_semantic():
+    """
+    Remove exact duplicates from Semantic.json.
+    Duplicates are lines with identical category & content.
     """
     try:
-        with open("Semantic.txt", 'r', encoding='utf-8') as f:
-            facts = f.readlines()
-        if len(facts) > max_memories:
-            # Keep most recent facts
-            facts = facts[-max_memories:]
-            with open("Semantic.txt", 'w', encoding='utf-8') as f:
-                f.writelines(facts)
-            # Invalidate cache
-            save_embeddings_cache([])
+        if not os.path.exists(FACTS_FILE):
+            return "No facts file exists"
+
+        with open(FACTS_FILE, 'r', encoding='utf-8') as file:
+            lines = [line.strip() for line in file if line.strip()]
+
+        if not lines:
+            return "No facts to process"
+
+        # Convert JSON lines to Fact objects, track unique ones
+        unique_facts = []
+        seen = set()
+        for line in lines:
+            fact_obj = Fact.from_json(line)
+            # A simple uniqueness check uses the (category, content) tuple
+            fact_tuple = (fact_obj.category, fact_obj.content)
+            if fact_tuple not in seen:
+                seen.add(fact_tuple)
+                unique_facts.append(fact_obj)
+
+        # Rewrite file with only unique facts
+        with open(FACTS_FILE, 'w', encoding='utf-8') as file:
+            for fact in unique_facts:
+                file.write(fact.to_json() + "\n")
+            file.truncate()
+
+        return f"Removed duplicates. Kept {len(unique_facts)} unique facts."
+
     except Exception as e:
-        logging.error(f"Error pruning memories: {e}")
+        logging.error(f"Error removing duplicates: {e}")
+        return f"Error: {str(e)}"
 
-def consolidate_memories(similarity_threshold=0.95):
-    """Merge similar facts to reduce redundancy
-    
-    Args:
-        similarity_threshold (float): Threshold for considering facts similar
-        
-    Process:
-        1. First removes exact duplicates
-        2. Then embeds remaining facts
-        3. Calculates similarity matrix
-        4. Merges similar facts
-        5. Updates file and cache
+
+def consolidate_semantic(similarity_threshold: float = 0.95) -> str:
+    """
+    Consolidate similar semantic facts based on a similarity threshold.
+    1. Remove exact duplicates first.
+    2. Embed remaining facts.
+    3. Merge any pairs above the threshold, rewriting the file.
     """
     try:
-        content = open_file("Semantic.txt")
-        if not content:
-            return
-            
-        # First remove exact duplicates using a set
-        memories = []
-        seen_facts = set()
-        
-        for memory in content.split("\n"):
-            memory = memory.strip()
-            if memory and memory not in seen_facts:
-                memories.append(memory)
-                seen_facts.add(memory)
-        
-        if not memories:
-            return
-            
-        # Then check for semantic similarity
-        embeddings = batch_embed_texts(memories)
-        
-        # Calculate similarity matrix
-        similarity_matrix = torch.cosine_similarity(embeddings.unsqueeze(1), 
-                                                 embeddings.unsqueeze(0))
-        
-        # Find and merge similar memories
-        consolidated = []
-        seen_indices = set()
-        
-        for i in range(len(memories)):
-            if i in seen_indices:
+        # First, remove duplicates
+        remove_msg = remove_duplicate_semantic()
+        logging.info(remove_msg)
+
+        # Load remaining facts
+        with open(FACTS_FILE, 'r', encoding='utf-8') as file:
+            facts = [Fact.from_json(line) for line in file if line.strip()]
+
+        if not facts:
+            return "No facts to consolidate."
+
+        # Step 1: Get embeddings for all facts
+        # Reuse 'batch_embed_texts' from your existing code
+        fact_texts = [f"[{fact.category}] {fact.content}" for fact in facts]
+        embeddings_tensor = batch_embed_texts(fact_texts, batch_size=5)
+        if embeddings_tensor.nelement() == 0:
+            return "No valid embeddings. Aborting."
+
+        # We'll keep track of which facts are 'merged'
+        merged_indices = set()  # if an index is merged, we won't rewrite it individually
+
+        # Step 2: Compare each pair (i, j) only once, i < j
+        n_facts = len(facts)
+        for i in range(n_facts):
+            if i in merged_indices:
                 continue
-                
-            # Find similar memories
-            similar_indices = torch.where(similarity_matrix[i] > similarity_threshold)[0].tolist()
-            
-            # Add to seen indices
-            seen_indices.update(similar_indices)
-            
-            # Keep the first occurrence
-            consolidated.append(memories[i])
-        
-        # Update file with consolidated memories
-        with open("Semantic.txt", 'w', encoding='utf-8') as f:
-            f.write("\n".join(consolidated))
-        
-        # Invalidate cache
-        save_embeddings_cache([])
-        
-        logging.info(f"Consolidated {len(content.split('\n'))} memories into {len(consolidated)} unique memories")
-        
+            for j in range(i + 1, n_facts):
+                if j in merged_indices:
+                    continue
+
+                sim = float(torch.cosine_similarity(
+                    embeddings_tensor[i].unsqueeze(0),
+                    embeddings_tensor[j].unsqueeze(0)
+                ))
+
+                # If they exceed the threshold, we merge them
+                if sim >= similarity_threshold:
+                    logging.info(f"Merging facts {i} and {j} with sim={sim:.3f}")
+                    # Example merge policy:
+                    merged_cat = facts[i].category  # or choose whichever you like
+                    merged_content = (
+                        f"{facts[i].content}"
+                    )
+                    # Overwrite fact i
+                    facts[i] = Fact(category=merged_cat, content=merged_content)
+                    # Mark fact j as merged
+                    merged_indices.add(j)
+
+        # Step 3: Rebuild the file with merges applied
+        # Filter out merged indices
+        final_facts = [facts[idx] for idx in range(n_facts) if idx not in merged_indices]
+
+        # Open file in write mode and truncate afterward
+        with open(FACTS_FILE, 'w+', encoding='utf-8') as file:
+            for fact in final_facts:  # or unique_facts
+                file.write(fact.to_json() + "\n")
+            file.truncate()  # Truncate leftover data if any
+
+
+        # Invalidate cache since we've modified the file
+        if EMBEDDINGS_CACHE.exists():
+            save_embeddings_cache([])
+
+        return f"Consolidation complete. Original: {n_facts} facts, merged down to {len(final_facts)}."
+
     except Exception as e:
-        logging.error(f"Error consolidating memories: {e}")
-
-def categorize_memories():
-    """Organize facts into categories for faster retrieval
-    
-    Returns:
-        dict: Facts organized by category
-    """
-    facts = open_file("Semantic.txt").split("\n")
-    categories = {}
-    
-    for fact in facts:
-        if '[' in fact and ']' in fact:
-            category = fact[fact.find('[')+1:fact.find(']')]
-            if category not in categories:
-                categories[category] = []
-            categories[category].append(fact)
-    
-    return categories
-
-
+        logging.error(f"Error consolidating semantic memories: {e}")
+        return f"Error: {str(e)}"

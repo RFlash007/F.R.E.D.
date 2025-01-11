@@ -1,364 +1,538 @@
-import logging
-import os
 import torch
 import ollama
-import time
+import logging
 import json
+import os
 from pathlib import Path
+from pydantic import BaseModel
+import Tools
 
-# ANSI escape sequences for coloring the output
-CYAN = "\033[96m"
-RESET_COLOR = "\033[0m"
+# Configure logging
+logging.basicConfig(level=logging.ERROR)
 
-# Track which memories have been accessed during the current session
-accessed_memories = []
+# Track which episodes have been accessed during the current session
+accessed_episodes = []
 
-# Cache setup
+# Cache setup for storing embeddings and processed episodes
 CACHE_DIR = Path("cache")
-EPISODIC_EMBEDDINGS_CACHE = CACHE_DIR / "episodic_embeddings.pt"
-MEMORIES_CACHE = CACHE_DIR / "episodic_memories.json"
+EMBEDDINGS_CACHE = CACHE_DIR / "episodic_embeddings.pt"  # PyTorch tensor cache
+EPISODES_FILE = "Episodic.json"  # Processed episodes storage
+
+class Episode(BaseModel):
+    """
+    Represents an episodic memory entry in JSON with the new structure:
+      - memory_timestamp
+      - context_tags
+      - conversation_summary
+      - what_worked
+      - what_to_avoid
+      - what_you_learned
+    """
+    memory_timestamp: str
+    context_tags: list[str]
+    conversation_summary: str
+    what_worked: str
+    what_to_avoid: str
+    what_you_learned: str
+
+    def to_json(self) -> str:
+        """
+        Convert episode to JSON format.
+        Use .model_dump() instead of .dict() for Pydantic v2.
+        """
+        return json.dumps(self.model_dump())
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> "Episode":
+        """
+        Create an Episode from a JSON string.
+        Use .model_validate_json() instead of parse_raw().
+        """
+        return cls.model_validate_json(json_str)
+
 
 def initialize_cache():
-    """Initialize cache directory and files
-    
-    Creates:
-    - cache/ directory if it doesn't exist
-    - episodic_embeddings.pt: stores tensor embeddings and last modified time
-    - episodic_memories.json: stores processed memory data
-    """
+    """Initialize cache directory and files for episodic data."""
     CACHE_DIR.mkdir(exist_ok=True)
-    if not EPISODIC_EMBEDDINGS_CACHE.exists():
-        torch.save({"embeddings": [], "last_modified": 0}, EPISODIC_EMBEDDINGS_CACHE)
-    if not MEMORIES_CACHE.exists():
-        with open(MEMORIES_CACHE, 'w') as f:
-            json.dump([], f)
+    if not EMBEDDINGS_CACHE.exists():
+        torch.save({"embeddings": [], "last_modified": 0}, EMBEDDINGS_CACHE)
+    if not os.path.exists(EPISODES_FILE):
+        with open(EPISODES_FILE, 'w', encoding='utf-8') as f:
+            pass  # Create empty file if it doesn't exist
+
 
 def load_cached_embeddings():
-    """Load embeddings from cache if they're up to date
-    
-    Returns:
-    - torch.Tensor: Cached embeddings if valid
-    - None: If cache is invalid or missing
-    
-    Cache is considered valid if:
-    1. Cache file exists
-    2. Cache's last_modified timestamp >= Episodic.txt's last modified time
     """
-    episodic_modified = os.path.getmtime("Episodic.txt")  # Get source file timestamp
+    Load episodic embeddings from cache if they're up to date.
+    Use weights_only=True to avoid future security warnings.
+    """
+    episodic_modified = os.path.getmtime(EPISODES_FILE)
     try:
-        cache = torch.load(EPISODIC_EMBEDDINGS_CACHE, weights_only=True, map_location='cpu')
-        if cache["last_modified"] >= episodic_modified:  # Check if cache is fresh
-            # Convert to tensor if stored as list
-            return torch.tensor(cache["embeddings"]) if isinstance(cache["embeddings"], list) else cache["embeddings"]
+        cache = torch.load(EMBEDDINGS_CACHE, map_location='cpu', weights_only=True)
+        if cache["last_modified"] >= episodic_modified:
+            if isinstance(cache["embeddings"], list):
+                return torch.tensor(cache["embeddings"])
+            return cache["embeddings"]
     except Exception as e:
         logging.warning(f"Error loading episodic cache: {e}")
     return None
 
+
 def save_embeddings_cache(embeddings):
-    """Save embeddings to cache
-    
-    Args:
-        embeddings: torch.Tensor of embeddings to cache
-        
-    Saves:
-    - embeddings: The actual embedding vectors
-    - last_modified: Current timestamp of Episodic.txt
-    """
+    """Save episodic embeddings to cache."""
     try:
         cache_data = {
             "embeddings": embeddings,
-            "last_modified": torch.tensor(os.path.getmtime("Episodic.txt"))
+            "last_modified": os.path.getmtime(EPISODES_FILE)
         }
-        torch.save(cache_data, EPISODIC_EMBEDDINGS_CACHE)
+        torch.save(cache_data, EMBEDDINGS_CACHE)
     except Exception as e:
         logging.error(f"Error saving episodic cache: {e}")
 
-def batch_embed_texts(texts, batch_size=5):
-    """Embed multiple texts in batches for efficiency"""
-    all_embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        embeddings = [ollama.embeddings(model='nomic-embed-text', prompt=text)["embedding"] 
-                     for text in batch]
-        all_embeddings.extend(embeddings)
-    return torch.tensor(all_embeddings)
 
-def open_file(filepath):
-    """Helper function to read file content with robust encoding handling
-    
-    Args:
-        filepath (str): Path to file to read
-        
-    Returns:
-        str: Content of file
-        
-    Tries UTF-8 first, falls back to other encodings if needed
+def create_episodic(memory: str) -> str:
     """
-    encodings = ['utf-8', 'latin-1', 'cp1252']
-    
-    for encoding in encodings:
-        try:
-            with open(filepath, 'r', encoding=encoding) as infile:
-                return infile.read()
-        except UnicodeDecodeError:
-            continue
-    
-    # If all encodings fail, try binary read and decode
+    Extract relevant episodic information from the conversation
+    and store it in EPISODES_FILE using the new JSON structure.
+    """
     try:
-        with open(filepath, 'rb') as infile:
-            content = infile.read()
-            return content.decode('utf-8', errors='ignore')
+        time = Tools.get_time()
+        # Prompt instructing the model to produce the new structure
+        episode_extraction_prompt = f"""Extract a single or multiple episodes from this conversation.
+TIME: {time}
+CONVERSATION:
+{memory}
+
+INSTRUCTIONS:
+- Return each episode as a JSON object with the following keys:
+  1. "memory_timestamp"
+  2. "context_tags" (array of strings)
+  3. "conversation_summary"
+  4. "what_worked"
+  5. "what_to_avoid"
+  6. "what_you_learned"
+- If something doesn't apply, use "N/A" or an empty string, but do NOT omit the field.
+- Return an array of these JSON objects if more than one.
+"""
+
+        response = ollama.chat(
+            model="huihui_ai/qwen2.5-abliterate:14b",
+            messages=[{"role": "user", "content": episode_extraction_prompt}],
+            format="json",
+            options={"temperature": 0}
+        )
+
+        if not response.get("message", {}).get("content"):
+            logging.warning("No content in AI response")
+            return ""
+
+        content = response["message"]["content"]
+
+        try:
+            # Parse the JSON response directly
+            episodes_data = json.loads(content)
+            if not isinstance(episodes_data, list):
+                episodes_data = [episodes_data]
+
+            required_fields = {
+                "memory_timestamp", "context_tags", "conversation_summary",
+                "what_worked", "what_to_avoid", "what_you_learned"
+            }
+
+            with open(EPISODES_FILE, 'a', encoding='utf-8') as file:
+                for data in episodes_data:
+                    # Check that all required fields are present
+                    if not required_fields.issubset(data.keys()):
+                        logging.error(
+                            f"Missing one or more fields from: {required_fields}\n"
+                            f"Output was: {data}"
+                        )
+                        continue
+
+                    # Convert any list fields to single string
+                    for key in ["what_worked", "what_to_avoid", "what_you_learned"]:
+                        if isinstance(data.get(key), list):
+                            data[key] = "\n".join(data[key])
+
+                    # Only create Episode if everything is present (post-conversion)
+                    episode = Episode(
+                        memory_timestamp=data["memory_timestamp"],
+                        context_tags=data["context_tags"],  # still a list
+                        conversation_summary=data["conversation_summary"],
+                        what_worked=data["what_worked"],
+                        what_to_avoid=data["what_to_avoid"],
+                        what_you_learned=data["what_you_learned"]
+                    )
+                    file.write(episode.to_json() + "\n")
+
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing JSON: {e}")
+            return ""
+        except Exception as e:
+            logging.error(f"Error processing episode: {e}")
+            return ""
+
+        # Invalidate cache
+        if EMBEDDINGS_CACHE.exists():
+            save_embeddings_cache([])
+
+        return content
+
     except Exception as e:
-        logging.error(f"Failed to read file {filepath} with any encoding: {e}")
+        logging.error(f"Error in create_episodic: {e}")
         return ""
 
-def get_relevant_context(user_input, vault_embeddings, vault_content, top_k=2):
-    if not isinstance(vault_embeddings, torch.Tensor) or vault_embeddings.nelement() == 0:  # Check type and emptiness
-        return []
 
-    # Get embedding for user input
-    response = ollama.embeddings(model='nomic-embed-text', prompt=user_input)
-    input_embedding = torch.tensor(response["embedding"])
+def update_episodic(conversation: str) -> str:
+    """
+    Update the episodic data in EPISODES_FILE based on a new conversation,
+    only for episodes that were previously accessed in `accessed_episodes`.
+    """
+    try:
+        if not accessed_episodes:
+            logging.info("No episodes to update")
+            return "No episodes accessed for update"
 
-    # Compute cosine similarity using optimized tensor operations
-    cos_scores = torch.cosine_similarity(input_embedding.unsqueeze(0), vault_embeddings)
-    
-    # Use efficient topk operation
-    top_k = min(top_k, len(cos_scores))
-    if top_k == 0:
-        return []
-    top_indices = torch.topk(cos_scores, k=top_k).indices.tolist()
+        updated_episodes = []
 
-    relevant_context = [vault_content[idx].strip() for idx in top_indices]
-    return relevant_context
+        # Load existing episodes
+        with open(EPISODES_FILE, 'r', encoding='utf-8') as file:
+            existing_episodes = [Episode.from_json(line) for line in file if line.strip()]
 
-def recall_episodic(input):
-    """Retrieve relevant episodic memories with caching"""
-    vault_path = "Episodic.txt"
-    if not os.path.exists(vault_path):
-        print("No Episodic.txt found.")
+        # Process each accessed episode individually
+        for episode_data in accessed_episodes:
+            episode = Episode.from_json(episode_data)
+
+            # Summarize the current fields to help the model see them
+            episode_update_prompt = f"""Review and update this specific episode based on the new conversation json summary.
+Focus only on this one episode; integrate any relevant new information.
+
+NEW CONVERSATION:
+{conversation}
+
+CURRENT EPISODE:
+memory_timestamp: {episode.memory_timestamp}
+context_tags: {episode.context_tags}
+conversation_summary: {episode.conversation_summary}
+what_worked: {episode.what_worked}
+what_to_avoid: {episode.what_to_avoid}
+what_you_learned: {episode.what_you_learned}
+
+INSTRUCTIONS:
+1. Update the episode if new information adds value
+2. Remove redundant information, summarizing where it's possible.
+3. Return the updated episode as a JSON object with the same keys:
+   - memory_timestamp
+   - context_tags (list)
+   - conversation_summary
+   - what_worked
+   - what_to_avoid
+   - what_you_learned
+"""
+
+            response = ollama.chat(
+                model="huihui_ai/qwen2.5-abliterate:14b",
+                messages=[{"role": "user", "content": episode_update_prompt}],
+                format="json",  # Avoid schema_json()
+                options={"temperature": 0}
+            )
+
+            if response.get("message", {}).get("content"):
+                try:
+                    new_data = json.loads(response["message"]["content"])
+                    # Make sure the updated data has all the required fields
+                    required_fields = {
+                        "memory_timestamp", "context_tags", "conversation_summary",
+                        "what_worked", "what_to_avoid", "what_you_learned"
+                    }
+                    if not required_fields.issubset(new_data.keys()):
+                        logging.warning(
+                            f"Failed to update episode due to missing fields in AI output: {new_data}"
+                        )
+                        # Keep old version if update is invalid
+                        updated_episodes.append(episode)
+                    else:
+                        # Convert lists to string if needed
+                        for key in ["what_worked", "what_to_avoid", "what_you_learned"]:
+                            if isinstance(new_data.get(key), list):
+                                new_data[key] = "\n".join(new_data[key])
+
+                        updated_episode = Episode(
+                            memory_timestamp=new_data["memory_timestamp"],
+                            context_tags=new_data["context_tags"],
+                            conversation_summary=new_data["conversation_summary"],
+                            what_worked=new_data["what_worked"],
+                            what_to_avoid=new_data["what_to_avoid"],
+                            what_you_learned=new_data["what_you_learned"]
+                        )
+                        updated_episodes.append(updated_episode)
+                except json.JSONDecodeError as e:
+                    logging.error(f"JSON decode error for updated episode: {e}")
+                    updated_episodes.append(episode)
+            else:
+                logging.warning(f"Failed to update episode: {episode}")
+                updated_episodes.append(episode)
+
+        # Rebuild the entire file with preserved + updated episodes
+        preserved_episodes = [
+            ep for ep in existing_episodes
+            if ep.to_json() not in accessed_episodes
+        ]
+        with open(EPISODES_FILE, 'w', encoding='utf-8') as file:
+            for ep in preserved_episodes + updated_episodes:
+                file.write(ep.to_json() + "\n")
+
+        try:
+            consolidate_episodic()
+        except Exception as e:
+            logging.error(f"Error consolidating episodic data: {e}")
+
+        # Invalidate cache
+        if EMBEDDINGS_CACHE.exists():
+            save_embeddings_cache([])
+
+        accessed_episodes.clear()  # Clear accessed episodes after update
+        return f"Successfully updated {len(updated_episodes)} episodes"
+
+    except Exception as e:
+        logging.error(f"Error updating episodic data: {e}")
+        return f"Error: {str(e)}"
+
+
+def batch_embed_texts(texts, batch_size=5):
+    """Embed multiple texts in batches for efficiency (episodic version)."""
+    all_embeddings = []
+
+    try:
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            batch_embeddings = []
+
+            for text in batch:
+                response = ollama.embeddings(model='nomic-embed-text', prompt=text)
+                embedding = response["embedding"]
+                batch_embeddings.append(embedding)
+
+            all_embeddings.extend(batch_embeddings)
+
+        return torch.tensor(all_embeddings)
+
+    except Exception as e:
+        logging.error(f"Error in batch_embed_texts: {str(e)}")
+        return torch.tensor([])  # Return empty tensor on error    
+
+
+def recall_episodic(query: str, top_k: int = 1) -> list:
+    """
+    Retrieves relevant episodes based on a query using semantic search.
+    """
+    if not os.path.exists(EPISODES_FILE):
         return []
 
     try:
         initialize_cache()
-        
-        # Load vault content
-        content = open_file(vault_path)
-        vault_content = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
+
+        # Load and preprocess episodes
+        with open(EPISODES_FILE, 'r', encoding='utf-8') as file:
+            episodes = [Episode.from_json(line) for line in file if line.strip()]
+
+        if not episodes:
+            return []
 
         # Try to load cached embeddings
-        vault_embeddings_tensor = load_cached_embeddings()
-        
-        if vault_embeddings_tensor is None:
+        episode_embeddings_tensor = load_cached_embeddings()
+
+        if episode_embeddings_tensor is None or episode_embeddings_tensor.nelement() == 0:
             # Generate new embeddings in batches
-            vault_embeddings_tensor = batch_embed_texts(vault_content)
-            save_embeddings_cache(vault_embeddings_tensor)
+            episode_embeddings_tensor = batch_embed_texts(
+                [
+                    # Convert the new structure to a text prompt
+                    f"{ep.memory_timestamp} | {ep.context_tags} | {ep.conversation_summary} | "
+                    f"What worked: {ep.what_worked} | Avoid: {ep.what_to_avoid} | Learned: {ep.what_you_learned}"
+                    for ep in episodes
+                ]
+            )
+            save_embeddings_cache(episode_embeddings_tensor)
 
-        # Retrieve best matching context
-        relevant_context = get_relevant_context(input, vault_embeddings_tensor, vault_content, top_k=1)
-        
-        # Store accessed memories
-        if relevant_context:
-            accessed_memories.extend(relevant_context)
-            
-        return relevant_context
+        # Get query embedding
+        query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
+        query_embedding = torch.tensor(query_response["embedding"])
+
+        # Calculate similarities
+        similarities = torch.cosine_similarity(
+            query_embedding.unsqueeze(0),
+            episode_embeddings_tensor
+        )
+
+        # Get top-k most relevant episodes
+        top_k = min(top_k, len(similarities))
+        top_k_indices = torch.topk(similarities, top_k).indices
+        relevant_episodes = [episodes[idx].to_json() for idx in top_k_indices]
+
+        # Track accessed episodes
+        for episode in relevant_episodes:
+            if episode not in accessed_episodes:
+                accessed_episodes.append(episode)
+
+        return relevant_episodes
 
     except Exception as e:
-        logging.error(f"Error in recall_episodic: {e}")
+        logging.error(f"Error in recall_episodic: {str(e)}")
         return []
-
-def create_memory(conversation: str) -> str:
-    """Creates a memory entry and invalidates cache
     
-    Cache invalidation happens when:
-    1. New memories are created
-    2. Existing memories are updated
-    3. Memories are pruned or consolidated
+
+
+def remove_duplicate_episodic():
+    """
+    Remove exact duplicates from Episodic.json.
+    Duplicates = lines with identical 6 fields in an Episode.
     """
     try:
-        current_time = time.time()
-        conversation_date = time.strftime("%d %B %Y", time.localtime(current_time))
+        if not os.path.exists(EPISODES_FILE):
+            return "No episodic file exists."
 
-        reflection_prompt_template = """You are creating a memory from the perspective of the Assistant Fred in this conversation summary. The conversation occurred on """ + conversation_date + """. If you do not have enough information for a field, use "N/A". Write one concise sentence per field. Focus on information that will be useful in future interactions. Include context_tags that are specific and reusable. Provide a memory_timestamp.
-        
-        Output valid JSON in this exact format and nothing else **WRITE NO OTHER TEXT OR DIALOGUE**:
+        with open(EPISODES_FILE, 'r', encoding='utf-8') as file:
+            lines = [line.strip() for line in file if line.strip()]
 
-            [
-                "timestamp": "YYYY-MM-DD HH:MM",
-                "tags": ["tag1", "tag2"],
-                "summary": "Brief conversation summary",
-                "insights": {
-                    "positive": "What worked well",
-                    "negative": "What to improve",
-                    "learned": "Key learnings"
-                }
-            ]
+        if not lines:
+            return "No episodes to process."
 
-        Conversation Summary:
-        """ + conversation + """"
-        """
+        unique_episodes = []
+        seen = set()
 
-        response = ollama.chat(
-            model="huihui_ai/qwen2.5-abliterate:14b", 
-            messages=[{"role": "user", "content": reflection_prompt_template}]
-        )
+        for line in lines:
+            episode_obj = Episode.from_json(line)
 
-        if not response.get("message", {}).get("content"):
-            print("Error: No content in memory creation response")
-            return ""
+            # Identify uniqueness by the 6 fields of an Episode
+            episode_tuple = (
+                episode_obj.memory_timestamp,
+                tuple(episode_obj.context_tags),  # must be a tuple for set() usage
+                episode_obj.conversation_summary,
+                episode_obj.what_worked,
+                episode_obj.what_to_avoid,
+                episode_obj.what_you_learned
+            )
 
-        episodic_content = response["message"]["content"]
-        
-        with open("Episodic.txt", 'a', encoding='utf-8') as file:
-            file.write(f"\n\n{episodic_content}")
-        
-        # Invalidate cache by saving empty embeddings
-        if EPISODIC_EMBEDDINGS_CACHE.exists():
-            save_embeddings_cache([])
-            
-        return episodic_content
-        
-    except Exception as e:
-        print(f"Error creating memory: {e}")
-        return ""
+            if episode_tuple not in seen:
+                seen.add(episode_tuple)
+                unique_episodes.append(episode_obj)
 
-def update_episodic(conversation_summary):
-    """Updates Episodic memories and invalidates cache"""
-    updated_memories = []
-    memory_update_prompt = """Review and update these memory entries based on the new conversation.
-
-    NEW CONVERSATION:
-    """ + conversation_summary + """
-
-    EXISTING MEMORIES:
-    """ + str(accessed_memories) + """
-
-    INSTRUCTIONS:
-    1. Compare new conversation with existing memories
-    2. Update only if new information conflicts or adds value
-    3. Merge overlapping memories
-    4. Keep JSON format
-    5. **WRITE NO OTHER TEXT OR DIALOGUE**
-    [
-        "timestamp": "YYYY-MM-DD HH:MM",
-        "tags": ["tag1", "tag2"],
-        "summary": "Brief conversation summary",
-        "insights": {
-            "positive": "What worked well",
-            "negative": "What to improve",
-            "learned": "Key learnings"
-        }
-    ]
-    """
-
-    try:
-        # Get updated memories from LLM
-        messages = [{"role": "user", "content": memory_update_prompt}]
-        response = ollama.chat(
-            model="huihui_ai/qwen2.5-abliterate:14b", 
-            messages=messages
-        )
-
-        if not response["message"]["content"]:
-            logging.warning("No content returned from LLM")
-            return
-
-        updated_memories = [response["message"]["content"]]
-
-        # Update file with consolidated memories
-        with open("Episodic.txt", 'r+', encoding='utf-8') as file:
-            # Read and filter existing content
-            content = file.read()
-            chunks = [chunk.strip() for chunk in content.split("\n\n") if chunk.strip()]
-            preserved_chunks = [chunk for chunk in chunks if chunk not in accessed_memories]
-            
-            # Write updated content
-            file.seek(0)
-            file.write("\n\n".join(preserved_chunks + updated_memories))
+        # Rewrite file with only unique episodes
+        with open(EPISODES_FILE, 'w+', encoding='utf-8') as file:
+            for ep in unique_episodes:
+                file.write(ep.to_json() + "\n")
             file.truncate()
-        consolidate_memories()
-        # Invalidate cache after update
-        if EPISODIC_EMBEDDINGS_CACHE.exists():
-            save_embeddings_cache([])
+
+        return f"Removed duplicates. Kept {len(unique_episodes)} unique episodes."
+
     except Exception as e:
-        logging.error(f"Error updating episodic memory: {str(e)}")
-        raise
+        logging.error(f"Error removing duplicates: {e}")
+        return f"Error: {str(e)}"
 
-def prune_old_memories(max_memories=1000):
-    """Remove oldest memories when exceeding threshold"""
-    with open("Episodic.txt", 'r') as f:
-        memories = f.read().split("\n\n")
-    if len(memories) > max_memories:
-        # Keep most recent memories
-        memories = memories[-max_memories:]
-        with open("Episodic.txt", 'w') as f:
-            f.write("\n\n".join(memories))
-        # Invalidate cache
-        save_embeddings_cache([])
 
-def consolidate_memories(similarity_threshold=0.95):
-    """Merge similar facts to reduce redundancy
-    
-    Args:
-        similarity_threshold (float): Threshold for considering facts similar
-        
-    Process:
-        1. First removes exact duplicates
-        2. Then embeds remaining facts
-        3. Calculates similarity matrix
-        4. Merges similar facts
-        5. Updates file and cache
+
+def consolidate_episodic(similarity_threshold: float = 0.95) -> str:
     """
+    Consolidate similar episodic memories based on a similarity threshold.
+    1. Remove exact duplicates first.
+    2. Embed remaining episodes.
+    3. Merge any pairs above the threshold, rewriting the file.
+    """
+
     try:
-        content = open_file("Episodic.txt")
-        if not content:
-            return
-            
-        # First remove exact duplicates using a set
-        memories = []
-        seen_facts = set()
-        
-        for memory in content.split("\n\n"):
-            memory = memory.strip()
-            if memory and memory not in seen_facts:
-                memories.append(memory)
-                seen_facts.add(memory)
-        
-        if not memories:
-            return
-            
-        # Then check for semantic similarity
-        embeddings = batch_embed_texts(memories)
-        
-        # Calculate similarity matrix
-        similarity_matrix = torch.cosine_similarity(embeddings.unsqueeze(1), 
-                                                 embeddings.unsqueeze(0))
-        
-        # Find and merge similar memories
-        consolidated = []
-        seen_indices = set()
-        
-        for i in range(len(memories)):
-            if i in seen_indices:
+        # First, remove duplicates
+        remove_msg = remove_duplicate_episodic()
+        logging.info(remove_msg)
+
+        # Load remaining episodes
+        with open(EPISODES_FILE, 'r', encoding='utf-8') as file:
+            episodes = [Episode.from_json(line) for line in file if line.strip()]
+
+        if not episodes:
+            return "No episodes to consolidate."
+
+        # Step 1: Embed all episodes
+        # Convert each Episode into a text prompt for embeddings
+        episode_prompts = [
+            (
+                f"{ep.memory_timestamp} | {ep.context_tags} | {ep.conversation_summary} | "
+                f"What worked: {ep.what_worked} | Avoid: {ep.what_to_avoid} | Learned: {ep.what_you_learned}"
+            )
+            for ep in episodes
+        ]
+        embeddings_tensor = batch_embed_texts(episode_prompts, batch_size=5)
+        if embeddings_tensor.nelement() == 0:
+            return "No valid embeddings. Aborting."
+
+        merged_indices = set()  # track which episodes get merged out
+        n_episodes = len(episodes)
+
+        # Step 2: Compare each pair (i, j) only once, i < j
+        for i in range(n_episodes):
+            if i in merged_indices:
                 continue
-                
-            # Find similar memories
-            similar_indices = torch.where(similarity_matrix[i] > similarity_threshold)[0].tolist()
-            
-            # Add to seen indices
-            seen_indices.update(similar_indices)
-            
-            # Keep the first occurrence
-            consolidated.append(memories[i])
-        
-        # Update file with consolidated memories
-        with open("Episodic.txt", 'w', encoding='utf-8') as f:
-            f.write("\n\n".join(consolidated))
-        
+            for j in range(i + 1, n_episodes):
+                if j in merged_indices:
+                    continue
+
+                sim = float(torch.cosine_similarity(
+                    embeddings_tensor[i].unsqueeze(0),
+                    embeddings_tensor[j].unsqueeze(0)
+                ))
+
+                if sim >= similarity_threshold:
+                    logging.info(f"Merging episodes {i} and {j} with sim={sim:.3f}")
+
+                    # Example merge policy:
+                    # 1) Keep earliest memory_timestamp (e.g., i).
+                    # 2) Combine context_tags from both.
+                    # 3) Combine the textual fields with line breaks.
+                    new_timestamp = episodes[i].memory_timestamp
+                    combined_tags = list(set(episodes[i].context_tags + episodes[j].context_tags))
+                    new_conversation_summary = (
+                        f"{episodes[i].conversation_summary}"
+                    )
+                    new_what_worked = (
+                        f"{episodes[i].what_worked}"
+                    )
+                    new_what_to_avoid = (
+                        f"{episodes[i].what_to_avoid}"
+                    )
+                    new_what_you_learned = (
+                        f"{episodes[i].what_you_learned}"
+                    )
+
+                    # Overwrite i
+                    episodes[i] = Episode(
+                        memory_timestamp=new_timestamp,
+                        context_tags=combined_tags,
+                        conversation_summary=new_conversation_summary,
+                        what_worked=new_what_worked,
+                        what_to_avoid=new_what_to_avoid,
+                        what_you_learned=new_what_you_learned
+                    )
+                    # Mark j as merged
+                    merged_indices.add(j)
+
+        # Step 3: Rebuild the file with merges applied
+        final_episodes = [episodes[idx] for idx in range(n_episodes) if idx not in merged_indices]
+
+        with open(EPISODES_FILE, 'w+', encoding='utf-8') as file:
+            for ep in final_episodes:
+                file.write(ep.to_json() + "\n")
+            file.truncate()
+
         # Invalidate cache
-        save_embeddings_cache([])
-        
-        logging.info(f"Consolidated {len(content.split('\n\n'))} memories into {len(consolidated)} unique memories")
-        
+        if EMBEDDINGS_CACHE.exists():
+            save_embeddings_cache([])
+
+        return (f"Consolidation complete. Original: {n_episodes} episodes, "
+                f"merged down to {len(final_episodes)}.")
+
     except Exception as e:
-        logging.error(f"Error consolidating memories: {e}")
+        logging.error(f"Error consolidating episodic memories: {e}")
+        return f"Error: {str(e)}"
+
+    
+
+

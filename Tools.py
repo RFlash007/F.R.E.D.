@@ -1,55 +1,50 @@
 import os
-import ollama
-#from typing import List
 import time
-from duckduckgo_search import DDGS
+import logging
+
 import psutil
 import GPUtil
+from duckduckgo_search import DDGS
 
-def get_time()->str:
+logging.basicConfig(level=logging.ERROR)
+
+def get_time() -> str:
     """
-    Get the time in human-readable format
+    Get the current time in a human-readable format.
     """
     current_time = time.time()
     return time.strftime("%I:%M:%S %p, %d %B %Y", time.localtime(current_time))
 
-def quick_learn(topics) -> str:
+
+def quick_learn(topics: str) -> str:
     """
-    Learn about anything from DuckDuckGo with search.
+    Perform a DuckDuckGo-based search for informational learning.
+
+    1. Perform text & news searches on each topic (comma-separated).
+    2. Summarize the combined results in an "educational" style.
+    3. If summarization fails, return raw search results.
 
     Args:
-        topics (str): The topics to learn about
+        topics (str): The user's desired learning topics, comma-separated.
 
     Returns:
-        str: Curated information about the topics from multiple sources
+        str: A summary or raw results if summarization fails.
     """
-    #If the user provides a topic use it if not use default topics
     ddgs = DDGS()
-    if topics:
-        try:
-            topics = ddgs.chat(
-                keywords=f"""Based on this message: ({topics}), write exactly three phrases to search google for In order to find what the user is asking for. If the user ask for todays news use stuff like: Technology, Science, Presidents, and war. Write just the keywords or phrases, no other text. Write commas in between every keyword or phrase
-                for example: OpenAI, War in Ukraine, etc. ***ONLY RETURN THREE PHRASES OR KEYWORDS***""",
-                model="gpt-4o-mini",  # or "claude-3-haiku", "llama-3.1-70b", etc.
-                timeout=60           # optional, defaults to 30 seconds
-            )
-        except Exception as e:
-            print(f"Error generating keywords: {e}")
-            return "Error generating keywords"
 
-    #remove commas from the topics and put into array for duckduckgo search
-    topics = topics.split(",")
-    topics = [topic.strip() for topic in topics]
-    print(topics)
-    #set settings for duckduckgo search
+    # Split topics by commas
+    topics_list = [t.strip() for t in topics.split(",") if t.strip()]
+
     region = "us-en"
     safesearch = "off"
 
-    #News and Text Search for all topics
-    search_results = []
+    # Gather results
+    text_results = []
     news_results = []
-    for topic in topics:
-        search_results.extend(ddgs.text(
+
+    # For each topic, do text + news
+    for topic in topics_list:
+        text_results.extend(ddgs.text(
             keywords=topic,
             region=region,
             safesearch=safesearch,
@@ -62,256 +57,215 @@ def quick_learn(topics) -> str:
             max_results=1
         ))
 
-    #Summarize the text
-    text_summary_prompt = f"You are a information summarizer, include every detail of the text results but make it as concise as possible. Return just the summary, no other text. Here is the information to summarize: {search_results}"
-    #Summarize the news
-    news_summary_prompt = f"You are a information summarizer, include every detail of the news results but make it as concise as possible. Return just the summary, no other text. Here is the information to summarize: {news_results}"
+    # Attempt summarization
+    text_summary_prompt = (
+        "You are an educational summarizer. Summarize these search results "
+        "in a concise but thorough manner, focusing on learning and clarity. "
+        "If not enough info is provided, do your best to fill in context. "
+        "Return ONLY the summary:\n"
+        f"{text_results}"
+    )
+    news_summary_prompt = (
+        "You are an educational summarizer. Summarize these news results "
+        "in a concise but thorough manner, focusing on learning and clarity. "
+        "Return ONLY the summary:\n"
+        f"{news_results}"
+    )
 
-   
-    #Storing non Summary of info in case AI fails to generate summary
-    bare_info = (f"\nText Results: {search_results}\nNews Results: {news_results}")
+    # Fallback if summarization fails
+    bare_info = (
+        f"[Text Results]\n{text_results}\n\n"
+        f"[News Results]\n{news_results}"
+    )
 
-    #Summarize the text
+    try:
+        # Summarize text results
+        text_response = ddgs.chat(
+            keywords=text_summary_prompt,
+            model="gpt-4o-mini",
+            timeout=60
+        )
+        # Summarize news results
+        news_response = ddgs.chat(
+            keywords=news_summary_prompt,
+            model="gpt-4o-mini",
+            timeout=60
+        )
+    except Exception as e:
+        logging.error(f"Summarization error: {e}")
+        return bare_info
+
+    return f"Text Summary:\n{text_response}\n\nNews Summary:\n{news_response}"
+
+
+def news(topics: str) -> str:
+    """
+    Perform a DuckDuckGo-based search for news topics.
+
+    1. Perform text & news searches on each topic (comma-separated).
+    2. Summarize the combined results with a news-oriented style.
+    3. If summarization fails, return raw search results.
+
+    Args:
+        topics (str): The user's desired news topics, comma-separated.
+
+    Returns:
+        str: A summary or raw results if summarization fails.
+    """
+    ddgs = DDGS()
+
+    # Split topics by commas
+    topics_list = [t.strip() for t in topics.split(",") if t.strip()]
+
+    region = "us-en"
+    safesearch = "off"
+
+    # Gather results
+    text_results = []
+    news_results = []
+
+    for topic in topics_list:
+        text_results.extend(ddgs.text(
+            keywords=topic,
+            region=region,
+            safesearch=safesearch,
+            max_results=2
+        ))
+        news_results.extend(ddgs.news(
+            keywords=topic,
+            region=region,
+            safesearch=safesearch,
+            max_results=2
+        ))
+
+    # Attempt summarization
+    text_summary_prompt = (
+        "You are a news summarizer. Summarize these text results in a "
+        "journalistic style, highlighting recent or important events. "
+        "Return ONLY the summary:\n"
+        f"{text_results}"
+    )
+    news_summary_prompt = (
+        "You are a news summarizer. Summarize these news results with a "
+        "journalistic approach. Return ONLY the summary:\n"
+        f"{news_results}"
+    )
+
+    # Fallback if summarization fails
+    bare_info = (
+        f"[Text Results]\n{text_results}\n\n"
+        f"[News Results]\n{news_results}"
+    )
+
     try:
         text_response = ddgs.chat(
             keywords=text_summary_prompt,
-            model="gpt-4o-mini",  # or "claude-3-haiku", "llama-3.1-70b", etc.
-            timeout=60           # optional, defaults to 30 seconds
+            model="gpt-4o-mini",
+            timeout=60
         )
-    except Exception as e:
-        return bare_info
-    try:
         news_response = ddgs.chat(
             keywords=news_summary_prompt,
-            model="gpt-4o-mini",  # or "claude-3-haiku", "llama-3.1-70b", etc.
-            timeout=60           # optional, defaults to 30 seconds
+            model="gpt-4o-mini",
+            timeout=60
         )
     except Exception as e:
+        logging.error(f"Summarization error: {e}")
         return bare_info
-    
-    return f"\nText Summary: {text_response}\nNews Summary: {news_response}"
 
-def news(user_input) -> str:
-    """
-    Get the news from the user input
-    """
-    return quick_learn(user_input)
+    return f"Text Summary:\n{text_response}\n\nNews Summary:\n{news_response}"
 
-def verify_memories() -> str:
-    """
-    Goes through Models memory database and verifies that the formatting of the data is correct.
-    Verifies the memories.
-
-    Returns:
-        A String stating whether the verification was successful or not.
-    """
-    print("Verifying Memories...")
-    # 1) Verify SEMANTIC.TXT
-    with open("Semantic.txt", 'r+', encoding='utf-8') as file:
-        content = file.read()
-
-        semantic_verification_prompt = f"""You are a database verification bot. Your task is to verify the formatting of data in a database.
-        Ensure that the following information is in the required format. Re-write the data in the required format if it is not correct.
-        If there are no errors, simply return all the original data in the required format. **Include NO extra dialogue or text** — only return the data in the correct format.
-        Here is the required format:
-        [PERSONAL] John is allergic to peanuts
-        [PREFERENCE] John prefers tea over coffee
-        [TECHNICAL] Python was created by Guido van Rossum
-        [LOCATION] John lives in Seattle
-
-        Here is the data:
-        {content}
-        """
-
-        messages = [{"role": "user", "content": semantic_verification_prompt}]
-        response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=messages)
-
-        file.seek(0)
-        # If LLM returns a string:
-        file.write(response["message"]["content"])
-        file.truncate()
-    print("Semantic Verification Complete")
-    # 2) Verify EPISODIC.TXT
-    with open("Episodic.txt", 'r+', encoding='utf-8') as file:
-        content = file.read()
-
-        episodic_verification_prompt = """You are a database verification bot. Verify and reformat the following memory entries.
-        Required format for each memory.
-        1. **IF THERE IS ANY EXTRA TEXT OR DIALOGUE, REMOVE IT**
-        2. **RETURN ONLY THE RESULT**
-        3. **WRITE NO EXTRA TEXT OR DIALOGUE**
-
-        REQUIRED FORMAT:       
-        [
-            "timestamp": "YYYY-MM-DD HH:MM",
-            "tags": ["tag1", "tag2"],
-            "summary": "Brief conversation summary",
-            "insights": {
-                "positive": "What worked well",
-                "negative": "What to improve",
-                "learned": "Key learnings"
-            }
-        ]\n\n(Another memory)\n\n(Another memory) etc...
-        
-        Here is the data to verify:
-        """ + content
-
-        messages = [{"role": "user", "content": episodic_verification_prompt}]
-        response = ollama.chat(model="huihui_ai/qwen2.5-abliterate:14b", messages=messages)
-
-        file.seek(0)
-        # If LLM returns a string:
-        file.write(response["message"]["content"])
-        file.truncate()
-    # (e.g., try to parse the JSON, check for certain keys).
-    print("Episodic Verification Complete")
-    return "Memory Verification was a Success"
 
 def get_system_status() -> str:
     """
-    Get system status information
-    
+    Get system status information: CPU usage, Memory usage, Disk usage,
+    and GPU usage (if available).
+
     Returns:
-        str: Formatted system status report
+        str: A formatted system status report.
     """
     cpu_usage = psutil.cpu_percent()
     memory = psutil.virtual_memory()
     disk = psutil.disk_usage('/')
-        
+
     try:
         gpus = GPUtil.getGPUs()
-        gpu_info = [{'name': gpu.name, 'load': gpu.load*100} for gpu in gpus]
-    except:
-        gpu_info = []
-        
-    try:
-        gpus = GPUtil.getGPUs()
-        gpu_info = [{'name': gpu.name, 'load': gpu.load*100} for gpu in gpus]
-    except:
-        gpu_info = []
-            
-    
-    status = {'cpu': cpu_usage,
-    'memory': memory.percent,
-    'disk': disk.percent,
-    'gpu': gpu_info}
-    
-    report = ""
-    report = "💻 System Status:\n\n"
-    report += f"CPU Usage: {status['cpu']}%\n"
-    report += f"Memory Usage: {status['memory']}%\n"
-    report += f"Disk Usage: {status['disk']}%\n"
-    
-    if status['gpu']:
-        for gpu in status['gpu']:
-            report += f"GPU ({gpu['name']}): {gpu['load']:.1f}%\n"
-            
-    return report
-
-def create_project(user_input) -> str:
-    """
-    Create a new project
-
-    Args:
-        project_name (str): The name of the project to create
-
-    Returns:
-       (str): A message stating whether the project was created successfully or not.
-    """
-    #Get the project name from the user input
-    prompt = f"""1. Get the project name from this messasge
-                 2. **ONLY RETURN THE PROJECT NAME NO OTHER TEXT OR DIALOGUE**
-                 For example if the user says "Create a project called 'My Project'" return "My Project"
-                Message: {user_input}"""
-    messages = [{"role": "user", "content": prompt}]
-    response = ollama.chat(model="llama3.2:3b", messages=messages)
-    project_name = response["message"]["content"]
-
-    try:
-        os.chdir('Projects')
-        os.mkdir(project_name.lower())
-        os.chdir('..')
-        return f"Project {project_name.lower()} has beencreated"
+        gpu_info = [f"GPU ({gpu.name}): {gpu.load*100:.1f}%" for gpu in gpus]
     except Exception as e:
-        return f"Failed to create project: {e}"
+        logging.error(f"GPU Info error: {e}")
+        gpu_info = []
 
-def open_project(user_input) -> str:
-    """
-    Open a project
+    report = [
+        "💻 System Status:",
+        f"CPU Usage: {cpu_usage}%",
+        f"Memory Usage: {memory.percent}%",
+        f"Disk Usage: {disk.percent}%"
+    ]
+    # Add GPU info if present
+    report.extend(gpu_info)
 
-    Args:
-        project_name (str): The name of the project to open
+    return "\n".join(report)
 
-    Returns:
-       (str): A message stating whether the project was opened successfully or not.
-    """
-    #Get the project name from the user input
-    prompt = f"""1. Get the project name from this messasge
-                 2. **ONLY RETURN THE PROJECT NAME NO OTHER TEXT OR DIALOGUE**
-                 For example if the user says "Open a project called 'My Project'" return "My Project"
-                Message: {user_input}"""
-    messages = [{"role": "user", "content": prompt}]
-    response = ollama.chat(model="llama3.2:3b", messages=messages)
-    project_name = response["message"]["content"]
 
-    try:
-        os.chdir('Projects')
-        with open(project_name.lower(), 'r') as file:
-            content = file.read()
-        return f"Project content {content} has been opened"
-    except Exception as e:
-        return f"Failed to open project: {e}"
-    
-# Map function names to actual functions
 available_functions = {
     'quick_learn': quick_learn,
-    'verify_memories': verify_memories,
-    'get_system_status': get_system_status,
-    'create_project': create_project,
     'news': news,
-    'open_project': open_project
+    'get_system_status': get_system_status,
 }
+
 
 def handle_tool_calls(response, user_input):
     """
     Handle tool calls returned from the Ollama chat response.
-
-    Args:
-        response: The response object from Ollama chat.
+    Collect multiple tool calls, run each, and append the results.
     """
-
-    #Get the tool calls from the response
     tool_calls = getattr(response.message, 'tool_calls', []) or []
     if not tool_calls:
         print("No tool calls found in the response.")
-        return
+        return None
 
-    for tool in tool_calls:
-        function_name = tool.function.name
-        function_to_call = available_functions.get(function_name)
-        #determine which function to call
-        if not function_to_call:
-            print(f"Function not found: {function_name}")
+    results = []
+
+    for tool_call in tool_calls:
+        function_name = tool_call.function.name
+        tool_args = tool_call.function.arguments or {}
+        function = available_functions.get(function_name)
+
+        if not function:
+            msg = f"Tool function '{function_name}' not found."
+            print(msg)
+            results.append(msg)
             continue
-        elif function_name == 'quick_learn':
+
+        # Attempt to call the function with the provided arguments
+        if function_name in ('quick_learn', 'news'):
+            # e.g. "topics" is expected
+            topics = tool_args.get('topics', user_input)
             try:
-                learned_data = function_to_call(user_input)
-                return learned_data
+                outcome = function(topics)
+                results.append(outcome)
             except Exception as e:
-                print("Failed to learn")
-        elif function_name == 'verify_memories':
-            return verify_memories()
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+
         elif function_name == 'get_system_status':
-            return get_system_status()
-        elif function_name == 'create_project':
-            return create_project(user_input)
-        elif function_name == 'open_project':
-            return open_project(user_input)
-        elif function_name == 'news':
             try:
-                learned_data = function_to_call(user_input)
-                return learned_data
+                system_report = function()
+                results.append(system_report)
             except Exception as e:
-                print("Failed to learn")
+                err_msg = f"Failed calling get_system_status: {e}"
+                print(err_msg)
+                results.append(err_msg)
+
         else:
-            print(f"Unhandled function: {function_name}")
+            msg = f"Unhandled function: {function_name}"
+            print(msg)
+            results.append(msg)
+
+    # Return combined output if multiple calls
+    if len(results) == 1:
+        return results[0]
+    elif len(results) > 1:
+        return "\n\n".join(results)
+    else:
+        return None
