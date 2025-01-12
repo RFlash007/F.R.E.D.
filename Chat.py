@@ -122,6 +122,201 @@ def process_message(user_input, ui_instance=None):
                     'required': []
                 }
             }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'create_note',
+                'description': (
+                    "Create a new note with the given title and content."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'note_title': {
+                            'type': 'string',
+                            'description': 'Title of the note to create'
+                        },
+                        'note_content': {
+                            'type': 'string',
+                            'description': 'Content to write in the note'
+                        }
+                    },
+                    'required': ['note_title', 'note_content']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'update_note',
+                'description': (
+                    "Update an existing note with the given title and content."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'note_title': {
+                            'type': 'string',
+                            'description': 'Title of the note to update'
+                        },
+                        'note_content': {
+                            'type': 'string',
+                            'description': 'New content for the note'
+                        }
+                    },
+                    'required': ['note_title', 'note_content']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'read_note',
+                'description': (
+                    "Read the content of an existing note."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'note_title': {
+                            'type': 'string',
+                            'description': 'Title of the note to read'
+                        }
+                    },
+                    'required': ['note_title']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'delete_note',
+                'description': (
+                    "Delete an existing note."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'note_title': {
+                            'type': 'string',
+                            'description': 'Title of the note to delete'
+                        }
+                    },
+                    'required': ['note_title']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'create_project',
+                'description': (
+                    "Create a new project directory."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'project_name': {
+                            'type': 'string',
+                            'description': 'Name of the project to create'
+                        }
+                    },
+                    'required': ['project_name']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'edit_file_in_project',
+                'description': (
+                    "Edit a specific file within a project."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'project_name': {
+                            'type': 'string',
+                            'description': 'Name of the project'
+                        },
+                        'file_name': {
+                            'type': 'string',
+                            'description': 'Name of the file to edit'
+                        },
+                        'file_content': {
+                            'type': 'string',
+                            'description': 'A concise description of what the Python code should do, including any essential features or constraints. Keep it clear and direct.'
+                        }
+                    },
+                    'required': ['project_name', 'file_name', 'file_content']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'read_file_in_project',
+                'description': (
+                    "Read a specific file within a project."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'project_name': {
+                            'type': 'string',
+                            'description': 'Name of the project'
+                        },
+                        'file_name': {
+                            'type': 'string',
+                            'description': 'Name of the file to read'
+                        }
+                    },
+                    'required': ['project_name', 'file_name']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'delete_project',
+                'description': (
+                    "Delete an entire project directory."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'project_name': {
+                            'type': 'string',
+                            'description': 'Name of the project to delete'
+                        }
+                    },
+                    'required': ['project_name']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'delete_file_in_project',
+                'description': (
+                    "Delete a specific file within a project."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'project_name': {
+                            'type': 'string',
+                            'description': 'Name of the project'
+                        },
+                        'file_name': {
+                            'type': 'string',
+                            'description': 'Name of the file to delete'
+                        }
+                    },
+                    'required': ['project_name', 'file_name']
+                }
+            }
         }
     ]
 
@@ -175,8 +370,8 @@ def process_message(user_input, ui_instance=None):
     response_content = response_content.replace('*', '')
 
     # 10. Handle voice output
-    voice_queue.put(response_content)
-    threading.Thread(target=process_voice_queue, daemon=True).start()
+    #voice_queue.put(response_content)
+    #threading.Thread(target=process_voice_queue, daemon=True).start()
 
     return response_content
 
@@ -276,7 +471,7 @@ if __name__ == "__main__":
     prompt = Procedural.get_prompt()
     modelfile = f'''
     FROM huihui_ai/qwen2.5-abliterate:14b
-    SYSTEM {prompt}
+    SYSTEM {prompt} If you wish to call a tool, ***REMEMBER TO RETURN THE VALID TOOL CALL JSON***
     '''
     # Create the custom model named 'FRED' with the system prompt
     ollama.create(model='FRED', modelfile=modelfile)

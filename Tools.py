@@ -1,10 +1,13 @@
 import os
 import time
 import logging
+import Notes
 
 import psutil
 import GPUtil
 from duckduckgo_search import DDGS
+
+import Projects
 
 logging.basicConfig(level=logging.ERROR)
 
@@ -57,19 +60,15 @@ def quick_learn(topics: str) -> str:
             max_results=1
         ))
 
-    # Attempt summarization
-    text_summary_prompt = (
-        "You are an educational summarizer. Summarize these search results "
+    # Combine results for single summarization
+    combined_prompt = (
+        "You are an educational summarizer. Summarize both the search results and news "
         "in a concise but thorough manner, focusing on learning and clarity. "
         "If not enough info is provided, do your best to fill in context. "
-        "Return ONLY the summary:\n"
-        f"{text_results}"
-    )
-    news_summary_prompt = (
-        "You are an educational summarizer. Summarize these news results "
-        "in a concise but thorough manner, focusing on learning and clarity. "
-        "Return ONLY the summary:\n"
-        f"{news_results}"
+        "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
+        "Return ONLY the summary.\n\n"
+        f"Search Results:\n{text_results}\n\n"
+        f"News Results:\n{news_results}"
     )
 
     # Fallback if summarization fails
@@ -79,23 +78,16 @@ def quick_learn(topics: str) -> str:
     )
 
     try:
-        # Summarize text results
-        text_response = ddgs.chat(
-            keywords=text_summary_prompt,
+        # Single summarization call
+        response = ddgs.chat(
+            keywords=combined_prompt,
             model="gpt-4o-mini",
             timeout=60
         )
-        # Summarize news results
-        news_response = ddgs.chat(
-            keywords=news_summary_prompt,
-            model="gpt-4o-mini",
-            timeout=60
-        )
+        return response
     except Exception as e:
         logging.error(f"Summarization error: {e}")
         return bare_info
-
-    return f"Text Summary:\n{text_response}\n\nNews Summary:\n{news_response}"
 
 
 def news(topics: str) -> str:
@@ -138,17 +130,14 @@ def news(topics: str) -> str:
             max_results=2
         ))
 
-    # Attempt summarization
-    text_summary_prompt = (
-        "You are a news summarizer. Summarize these text results in a "
-        "journalistic style, highlighting recent or important events. "
-        "Return ONLY the summary:\n"
-        f"{text_results}"
-    )
-    news_summary_prompt = (
-        "You are a news summarizer. Summarize these news results with a "
-        "journalistic approach. Return ONLY the summary:\n"
-        f"{news_results}"
+    # Combined prompt for single summarization
+    combined_prompt = (
+        "You are a news summarizer. Summarize both the text results and news "
+        "in a journalistic style, highlighting recent or important events. "
+        "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
+        "Return ONLY the summary:\n\n"
+        f"Text Results:\n{text_results}\n\n"
+        f"News Results:\n{news_results}"
     )
 
     # Fallback if summarization fails
@@ -158,21 +147,16 @@ def news(topics: str) -> str:
     )
 
     try:
-        text_response = ddgs.chat(
-            keywords=text_summary_prompt,
+        # Single summarization call
+        response = ddgs.chat(
+            keywords=combined_prompt,
             model="gpt-4o-mini",
             timeout=60
         )
-        news_response = ddgs.chat(
-            keywords=news_summary_prompt,
-            model="gpt-4o-mini",
-            timeout=60
-        )
+        return response
     except Exception as e:
         logging.error(f"Summarization error: {e}")
         return bare_info
-
-    return f"Text Summary:\n{text_response}\n\nNews Summary:\n{news_response}"
 
 
 def get_system_status() -> str:
@@ -210,6 +194,15 @@ available_functions = {
     'quick_learn': quick_learn,
     'news': news,
     'get_system_status': get_system_status,
+    'create_note': Notes.create_note,
+    'update_note': Notes.update_note,
+    'delete_note': Notes.delete_note,
+    'read_note': Notes.read_note,
+    'create_project': Projects.create_project,
+    'delete_project': Projects.delete_project,
+    'delete_file_in_project': Projects.delete_file_in_project,
+    'read_file_in_project': Projects.read_file_in_project,
+    'edit_file_in_project': Projects.edit_file_in_project
 }
 
 
@@ -256,7 +249,61 @@ def handle_tool_calls(response, user_input):
                 err_msg = f"Failed calling get_system_status: {e}"
                 print(err_msg)
                 results.append(err_msg)
-
+        elif function_name in ('create_note', 'update_note'):
+            try:
+                note_title = tool_args.get('note_title').lower()
+                note_content = tool_args.get('note_content')
+                if note_title is None or note_content is None:
+                    raise ValueError("Missing required note_title or note_content")
+                outcome = function(note_title, note_content)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name in ('delete_note', 'read_note'):
+            try:
+                note_title = tool_args.get('note_title').lower()
+                if note_title is None:
+                    raise ValueError("Missing required note_title")
+                outcome = function(note_title)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name in ('create_project', 'delete_project'):
+            try:
+                project_name = tool_args.get('project_name').lower()
+                if project_name is None:
+                    raise ValueError("Missing required project_name")
+                outcome = function(project_name)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name in ('delete_file_in_project', 'read_file_in_project'):
+            try:
+                project_name = tool_args.get('project_name').lower()
+                file_name = tool_args.get('file_name').lower()
+                outcome = function(project_name, file_name)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name in ('edit_file_in_project'):
+            try:
+                project_name = tool_args.get('project_name').lower()
+                file_name = tool_args.get('file_name').lower()
+                file_content = tool_args.get('file_content')
+                outcome = function(project_name, file_name, file_content)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
         else:
             msg = f"Unhandled function: {function_name}"
             print(msg)
