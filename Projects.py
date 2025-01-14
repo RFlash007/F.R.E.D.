@@ -32,6 +32,7 @@ def edit_file_in_project(project_name: str, file_name: str, file_content: str) -
     """
     #get python code from model
     code_prompt = f"""
+You are an expert Python programmer.
 You are tasked with writing Python code according to the following requirements.
 
 ### Instructions:

@@ -9,7 +9,7 @@ piper_lock = threading.Lock()
 # Define absolute paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PIPER_EXE = os.path.join(SCRIPT_DIR, "piper.exe")
-MODEL_PATH = os.path.join(SCRIPT_DIR, "en_US-danny.low.onnx")
+MODEL_PATH = os.path.join(SCRIPT_DIR, "en_US-danny-low.onnx")
 OUTPUT_FILE = os.path.join(SCRIPT_DIR, "test1.wav")
 
 def piper_speak(text, model_path=None, output_file=None):

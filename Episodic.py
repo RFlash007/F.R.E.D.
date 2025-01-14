@@ -431,7 +431,7 @@ def remove_duplicate_episodic():
 
 
 
-def consolidate_episodic(similarity_threshold: float = 0.95) -> str:
+def consolidate_episodic(similarity_threshold: float = 0.96) -> str:
     """
     Consolidate similar episodic memories based on a similarity threshold.
     1. Remove exact duplicates first.

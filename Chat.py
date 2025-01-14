@@ -10,12 +10,13 @@ import threading
 from queue import Queue
 import time
 import sys
+import logging
 
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
 
 conversation = []
-MAX_CONVERSATION_LENGTH = 10  # or whatever number makes sense
+MAX_CONVERSATION_LENGTH = 5  # or whatever number makes sense
 
 
 def shutdown_app(current_ui):
@@ -39,7 +40,7 @@ def process_message(user_input, ui_instance=None):
     if user_input.lower() == "goodbye":
         summary = summarize(conversation)
         # Update memories
-        Procedural.prompt_update(Episodic.create_episodic(summary))
+        Episodic.create_episodic(summary)
         Semantic.create_semantic(summary)
         Episodic.update_episodic(summary)
         Semantic.update_semantic(summary)
@@ -361,17 +362,29 @@ def process_message(user_input, ui_instance=None):
     response_content = response['message']['content']
     conversation.append({"role": "assistant", "content": response_content})
     print(user_prompt)
-    # 8. Trim conversation if it gets too long
+    # 8. Trim conversation if it gets too long and summarize perspectives
     if len(conversation) > MAX_CONVERSATION_LENGTH:
-        conversation.pop(0)
-        "Integrate working conversation history summary here"
+        # Get summaries from perspective_summary function
+        user_summary, assistant_summary = perspective_summary(str(conversation))
+        
+        # Clear existing conversation and replace with summaries
+        conversation.clear()
+        
+        # Add both summaries as context messages
+        conversation.extend([
+
+            {"role": "user", "content": user_summary},
+            
+            {"role": "assistant", "content": assistant_summary}
+        ])
+        
+        print("\nConversation summarized to retain context.")
 
     # 9. Remove asterisks or extraneous characters
     response_content = response_content.replace('*', '')
 
     # 10. Handle voice output
-    #voice_queue.put(response_content)
-    #threading.Thread(target=process_voice_queue, daemon=True).start()
+    voice_queue.put(response_content)
 
     return response_content
 
@@ -390,8 +403,8 @@ def chat_loop():
     voice_system.set_ui(ui)
 
     try:
-        # Start voice processing in a separate thread
-        voice_thread = threading.Thread(target=voice_system.process_audio, daemon=True)
+        # Initialize a single dedicated thread for voice processing at startup
+        voice_thread = threading.Thread(target=process_voice_queue, daemon=True)
         voice_thread.start()
 
         # Run UI in the main thread
@@ -405,6 +418,80 @@ def chat_loop():
         print("Voice system stopped.")
         sys.exit(0)  # Ensure complete shutdown
 
+def perspective_summary(input_data: str) -> tuple[str, str]:
+    """
+    Summarize conversation separately from user and assistant perspectives.
+    Only shows each perspective what they said in the conversation.
+    
+    Args:
+        input_data (str): The conversation history to summarize
+        
+    Returns:
+        tuple[str, str]: (user_summary, assistant_summary)
+    """
+    # Convert string back to list of messages if needed
+    if isinstance(input_data, str):
+        try:
+            # If it's a string representation of a list, try to eval it
+            conv_list = eval(input_data)
+        except:
+            # If eval fails, split by newlines as fallback
+            conv_list = input_data.split('\n')
+    else:
+        conv_list = input_data
+
+    # Filter messages by role
+    user_messages = "\n".join([msg["content"] for msg in conv_list 
+                             if msg["role"] == "user"])
+    
+    assistant_messages = "\n".join([msg["content"] for msg in conv_list 
+                                  if msg["role"] == "assistant"])
+
+    user_prompt = """
+    You are a Message Consolidator. Combine the following user messages into one coherent text message.
+    Example: 
+    User Messages: "Hello", "I need help with X", "What's the weather?"
+    Consolidated Message: "Hello, I need help with X, also what's the weather?"
+    ###RETURN ONLY THE RESULT###
+    Messages:
+    {conversation}
+    """.format(conversation=user_messages)
+
+    assistant_prompt = """
+    You are a Message Consolidator. Combine the following messages into one coherent text message.
+    Example: 
+    Assistant Messages: "I'm good", "How can I assist you?", "Here's the information you requested."
+    Consolidated Message: "I'm good, how can I assist you? Here's the information you requested."
+    ###RETURN ONLY THE RESULT###
+    Messages:
+    {conversation}
+    """.format(conversation=assistant_messages)
+
+    try:
+        # Get user perspective
+        user_response = ollama.chat(
+            model="llama3.2:3b",
+            messages=[{"role": "user", "content": user_prompt}],
+            stream=False
+        )
+        user_summary = user_response['message']['content']
+        print(user_summary)
+        
+        # Get assistant perspective
+        assistant_response = ollama.chat(
+            model="llama3.2:3b",
+            messages=[{"role": "user", "content": assistant_prompt}],
+            stream=False
+        )
+        assistant_summary = assistant_response['message']['content']
+        print(assistant_summary)
+
+        return user_summary, assistant_summary
+
+    except Exception as e:
+        logging.error(f"Error in perspective summary: {e}")
+        return ("Error creating user summary.", 
+                "Error creating assistant summary.")
 
 def summarize(input_data: str) -> str:
     time = Tools.get_time()
@@ -468,12 +555,24 @@ def process_voice_queue():
 
 
 if __name__ == "__main__":
+    # Initialize final_prompt before using it
+    final_prompt = ""
+    
+    # Get the system prompt
     prompt = Procedural.get_prompt()
+    final_prompt = " ".join(prompt.splitlines())
+        
+    # Define the modelfile with system prompt and increased context
     modelfile = f'''
     FROM huihui_ai/qwen2.5-abliterate:14b
-    SYSTEM {prompt} If you wish to call a tool, ***REMEMBER TO RETURN THE VALID TOOL CALL JSON***
+    SYSTEM {final_prompt}
+    PARAMETER num_ctx 4096
     '''
-    # Create the custom model named 'FRED' with the system prompt
-    ollama.create(model='FRED', modelfile=modelfile)
-    # Start the main loop
-    chat_loop()
+    
+    try:
+        # Create the custom model named 'FRED' with the system prompt and increased context
+        ollama.create(model='FRED', modelfile=modelfile)
+        # Start the main loop
+        chat_loop()
+    except Exception as e:
+        print(f"Error initializing FRED: {str(e)}")

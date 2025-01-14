@@ -340,7 +340,7 @@ def remove_duplicate_semantic():
         return f"Error: {str(e)}"
 
 
-def consolidate_semantic(similarity_threshold: float = 0.95) -> str:
+def consolidate_semantic(similarity_threshold: float = 0.96) -> str:
     """
     Consolidate similar semantic facts based on a similarity threshold.
     1. Remove exact duplicates first.
