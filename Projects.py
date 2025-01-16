@@ -49,7 +49,7 @@ Take the time to produce accurate, well-documented Python code that executes as 
     print(file_content)
 
     response = ollama.chat(
-        model="huihui_ai/qwen2.5-coder-abliterate:32b",
+        model="huihui_ai/qwen2.5-abliterate:14b",
         messages=[{"role": "user", "content": code_prompt}],
     )
     file_content = response['message']['content']
@@ -218,4 +218,7 @@ tools_schema = [
         }
     }
 ]
+
+if __name__ == "__main__":
+    print(edit_file_in_project("reasoning", "reason", "Write a hello world program"))
 

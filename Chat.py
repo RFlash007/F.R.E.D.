@@ -247,7 +247,7 @@ def process_message(user_input, ui_instance=None):
                         },
                         'file_content': {
                             'type': 'string',
-                            'description': 'A concise description of what the Python code should do, including any essential features or constraints. Keep it clear and direct.'
+                            'description': 'A simple description of what the Python code should do. Do not include any code.'
                         }
                     },
                     'required': ['project_name', 'file_name', 'file_content']
