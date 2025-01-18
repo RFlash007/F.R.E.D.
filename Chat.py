@@ -11,6 +11,8 @@ from queue import Queue
 import time
 import sys
 import logging
+import json
+from datetime import datetime
 
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
@@ -318,6 +320,62 @@ def process_message(user_input, ui_instance=None):
                     'required': ['project_name', 'file_name']
                 }
             }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'add_task',
+                'description': (
+                    "Add a new task to the task list."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'task_title': {
+                            'type': 'string',
+                            'description': 'Title of the task to add'
+                        },
+                        'task_content': {
+                            'type': 'string',
+                            'description': 'Content/description of the task'
+                        }
+                    },
+                    'required': ['task_title', 'task_content']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'read_task',
+                'description': (
+                    "Read all tasks from the task list."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {},
+                    'required': []
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'delete_task',
+                'description': (
+                    "Delete a task from the task list."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'task_title': {
+                            'type': 'string',
+                            'description': 'Title of the task to delete'
+                        }
+                    },
+                    'required': ['task_title']
+                }
+            }
         }
     ]
 
@@ -363,23 +421,42 @@ def process_message(user_input, ui_instance=None):
     conversation.append({"role": "assistant", "content": response_content})
     print(user_prompt)
     # 8. Trim conversation if it gets too long and summarize perspectives
-    if len(conversation) > MAX_CONVERSATION_LENGTH:
+    MAX_MESSAGES_BEFORE_SUMMARY = 10  # Adjust based on your needs
+    MAX_TOKENS_PER_MESSAGE = 1000     # Approximate token limit per message
+    
+    def should_summarize(conv):
+        """Determine if conversation needs summarization based on multiple factors"""
+        message_count = len(conv)
+        total_length = sum(len(msg["content"]) for msg in conv)
+        avg_message_length = total_length / message_count if message_count > 0 else 0
+        
+        return (
+            message_count > MAX_MESSAGES_BEFORE_SUMMARY or
+            total_length > MAX_MESSAGES_BEFORE_SUMMARY * MAX_TOKENS_PER_MESSAGE or
+            avg_message_length > MAX_TOKENS_PER_MESSAGE * 1.5  # Allow some messages to be longer
+        )
+    
+    if should_summarize(conversation):
         # Get summaries from perspective_summary function
         user_summary, assistant_summary = perspective_summary(str(conversation))
+        
+        # Keep the last few messages for immediate context
+        recent_messages = conversation[-3:]  # Keep last 3 messages
         
         # Clear existing conversation and replace with summaries
         conversation.clear()
         
         # Add both summaries as context messages
         conversation.extend([
-
             {"role": "user", "content": user_summary},
-            
-            {"role": "assistant", "content": assistant_summary}
+            {"role": "assistant", "content": assistant_summary},
         ])
         
-        print("\nConversation summarized to retain context.")
-
+        # Add back recent messages for immediate context
+        conversation.extend(recent_messages)
+        
+        print("\nConversation summarized while maintaining recent context.")
+    
     # 9. Remove asterisks or extraneous characters
     response_content = response_content.replace('*', '')
 
@@ -420,8 +497,8 @@ def chat_loop():
 
 def perspective_summary(input_data: str) -> tuple[str, str]:
     """
-    Summarize conversation separately from user and assistant perspectives.
-    Only shows each perspective what they said in the conversation.
+    Enhanced conversation summarization that maintains distinct perspectives while preserving
+    key context and semantic relationships.
     
     Args:
         input_data (str): The conversation history to summarize
@@ -429,62 +506,94 @@ def perspective_summary(input_data: str) -> tuple[str, str]:
     Returns:
         tuple[str, str]: (user_summary, assistant_summary)
     """
-    # Convert string back to list of messages if needed
+    # Parse conversation data
     if isinstance(input_data, str):
         try:
-            # If it's a string representation of a list, try to eval it
             conv_list = eval(input_data)
         except:
-            # If eval fails, split by newlines as fallback
             conv_list = input_data.split('\n')
     else:
         conv_list = input_data
 
-    # Filter messages by role
-    user_messages = "\n".join([msg["content"] for msg in conv_list 
-                             if msg["role"] == "user"])
+    # Group messages by role with context
+    user_context = []
+    assistant_context = []
     
-    assistant_messages = "\n".join([msg["content"] for msg in conv_list 
-                                  if msg["role"] == "assistant"])
+    for i, msg in enumerate(conv_list):
+        if msg["role"] == "user":
+            # Get surrounding context
+            prev_msg = conv_list[i-1] if i > 0 else None
+            next_msg = conv_list[i+1] if i < len(conv_list)-1 else None
+            
+            context = {
+                "message": msg["content"],
+                "prev_context": prev_msg["content"] if prev_msg and prev_msg["role"] == "assistant" else None,
+                "next_context": next_msg["content"] if next_msg and next_msg["role"] == "assistant" else None
+            }
+            user_context.append(context)
+            
+        elif msg["role"] == "assistant":
+            context = {
+                "message": msg["content"],
+                "prev_context": conv_list[i-1]["content"] if i > 0 else None,
+                "query": conv_list[i-1]["content"] if i > 0 and conv_list[i-1]["role"] == "user" else None
+            }
+            assistant_context.append(context)
 
+    # Create enhanced prompts that preserve context
     user_prompt = """
-    You are a Message Consolidator. Combine the following user messages into one coherent text message.
-    Example: 
-    User Messages: "Hello", "I need help with X", "What's the weather?"
-    Consolidated Message: "Hello, I need help with X, also what's the weather?"
-    ###RETURN ONLY THE RESULT###
-    Messages:
-    {conversation}
-    """.format(conversation=user_messages)
+    You are a Conversation Context Analyzer. Create a concise summary of the user's perspective,
+    maintaining key points and context of their queries and responses.
+    
+    Guidelines:
+    1. Focus on the user's main questions and concerns
+    2. Preserve the chronological flow of their inquiries
+    3. Include any specific preferences or requirements mentioned
+    4. Highlight unresolved queries or ongoing discussions
+    
+    Context:
+    {context}
+    
+    ###RETURN ONLY THE SUMMARY###
+    """.format(context=json.dumps(user_context, indent=2))
 
     assistant_prompt = """
-    You are a Message Consolidator. Combine the following messages into one coherent text message.
-    Example: 
-    Assistant Messages: "I'm good", "How can I assist you?", "Here's the information you requested."
-    Consolidated Message: "I'm good, how can I assist you? Here's the information you requested."
-    ###RETURN ONLY THE RESULT###
-    Messages:
-    {conversation}
-    """.format(conversation=assistant_messages)
+    You are a Conversation Context Analyzer. Create a concise summary of the assistant's perspective,
+    maintaining key points and the context of responses.
+    
+    Guidelines:
+    1. Focus on key information provided and solutions offered
+    2. Maintain context of what questions were being answered
+    3. Track any ongoing tasks or unresolved items
+    4. Note any learned preferences or important user context
+    
+    Context:
+    {context}
+    
+    ###RETURN ONLY THE SUMMARY###
+    """.format(context=json.dumps(assistant_context, indent=2))
 
     try:
-        # Get user perspective
+        # Get user perspective with enhanced context
         user_response = ollama.chat(
             model="llama3.2:3b",
             messages=[{"role": "user", "content": user_prompt}],
             stream=False
         )
         user_summary = user_response['message']['content']
-        print(user_summary)
         
-        # Get assistant perspective
+        # Get assistant perspective with enhanced context
         assistant_response = ollama.chat(
             model="llama3.2:3b",
             messages=[{"role": "user", "content": assistant_prompt}],
             stream=False
         )
         assistant_summary = assistant_response['message']['content']
-        print(assistant_summary)
+
+        # Add metadata to help with future context
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        user_summary = f"[Summary as of {timestamp}]\n{user_summary}"
+        assistant_summary = f"[Summary as of {timestamp}]\n{assistant_summary}"
 
         return user_summary, assistant_summary
 

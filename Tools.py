@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import Notes
+import Task
 
 import psutil
 import GPUtil
@@ -202,7 +203,10 @@ available_functions = {
     'delete_project': Projects.delete_project,
     'delete_file_in_project': Projects.delete_file_in_project,
     'read_file_in_project': Projects.read_file_in_project,
-    'edit_file_in_project': Projects.edit_file_in_project
+    'edit_file_in_project': Projects.edit_file_in_project,
+    'add_task': Task.add_task,
+    'read_task': Task.read_task,
+    'delete_task': Task.delete_task
 }
 
 
@@ -302,6 +306,37 @@ def handle_tool_calls(response, user_input):
                 results.append(outcome)
             except Exception as e:
                 err_msg = f"Failed calling {function_name}: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name == 'add_task':
+            try:
+                task_title = tool_args.get('task_title')
+                task_content = tool_args.get('task_content')
+                if task_title is None or task_content is None:
+                    raise ValueError("Missing required task_title or task_content")
+                outcome = function(task_title, task_content)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling add_task: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name == 'read_task':
+            try:
+                outcome = function()
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling read_task: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name == 'delete_task':
+            try:
+                task_title = tool_args.get('task_title')
+                if task_title is None:
+                    raise ValueError("Missing required task_title")
+                outcome = function(task_title)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling delete_task: {e}"
                 print(err_msg)
                 results.append(err_msg)
         else:

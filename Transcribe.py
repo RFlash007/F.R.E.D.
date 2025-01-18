@@ -17,14 +17,35 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 class VoiceTranscriber:
     def __init__(self, callback_function):
-        self.silence_threshold = 0.0015  # Adjust based on your microphone
+        self.silence_threshold = 0.0015  # Initial threshold
+        self.calibration_samples = []
+        self.calibration_duration = 2  # seconds
         self.silence_duration = 1.0    # Seconds of silence to mark end of speech
         self.last_speech_time = time.time()
         self.speech_buffer = []
         
         self.callback = callback_function
-        self.wake_words = ["fred", "hey fred", "okay fred"]
-        self.stop_words = ["goodbye", "bye fred", "stop listening"]
+        self.wake_words = [
+            "fred", "hey fred", "okay fred", 
+            "hi fred", "excuse me fred", "fred are you there"
+        ]
+        self.stop_words = [
+            "goodbye", "bye fred", "stop listening", 
+            "that's all", "thank you fred", "sleep now"
+        ]
+        self.acknowledgments = [
+            "Yes, I'm here.",
+            "How can I help?",
+            "I'm listening.",
+            "What can I do for you?",
+            "At your service."
+        ]
+        self.farewell_responses = [
+            "Goodbye for now.",
+            "Let me know if you need anything else.",
+            "Have a great day.",
+            "I'll be here when you need me."
+        ]
         
         # Audio configuration
         self.samplerate = 16000
@@ -45,6 +66,11 @@ class VoiceTranscriber:
         self.is_running = False
         self.current_conversation = []
         self.ui = None  # Add this line to store UI reference
+        self.is_speaking = False
+        self.interrupt_phrases = [
+            "wait", "hold on", "stop", "pause", 
+            "excuse me", "one moment"
+        ]
 
     def setup_model(self):
         """Initialize the Whisper model with optimal settings"""
@@ -64,6 +90,10 @@ class VoiceTranscriber:
         """Set the UI instance for displaying transcribed text"""
         self.ui = ui
 
+    def get_random_response(self, responses):
+        """Get a random response from a list to make conversations more natural"""
+        return np.random.choice(responses)
+
     def process_audio(self):
         """Process audio stream and detect wake words/commands"""
         while not self.terminate_event.is_set():
@@ -73,10 +103,13 @@ class VoiceTranscriber:
 
                 # Calculate audio level
                 audio_level = np.abs(audio_data).mean()
-                print(f"\rAudio level: {audio_level:.4f}", end="")
+                
+                # Debug audio levels periodically
+                if self.is_listening:
+                    print(f"\rAudio level: {audio_level:.6f} (Threshold: {self.silence_threshold:.6f})", end="")
 
                 # Only process audio if level is above threshold
-                if audio_level > 0.0016:
+                if audio_level > self.silence_threshold:
                     try:
                         segments, _ = self.model.transcribe(
                             audio_data, 
@@ -87,44 +120,41 @@ class VoiceTranscriber:
 
                         for segment in segments:
                             text = segment.text.strip().lower()
-                            # Ignore specific phrases
-                            if text in ["thanks for watching!", "thanks for watching"]:
-                                text = text.replace("thanks for watching!", "")
-                                text = text.replace("thanks for watching", "")
-                                
+                            
                             if text:
-                                print(f"\nDetected: {text}")
-                                timestamp = datetime.now().strftime("%H:%M:%S")
-                                
+                                print(f"\nDetected text: {text}")  # Debug detected text
+                            
                                 # Check for wake words when not listening
                                 if not self.is_listening:
                                     if any(wake_word in text for wake_word in self.wake_words):
-                                        print(f"\n[{timestamp}] Wake word detected! Listening...")
+                                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Wake word detected! Listening...")
+                                        response = self.get_random_response(self.acknowledgments)
                                         if self.ui:
-                                            self.ui.display_message("F.R.E.D: Yes, I'm here.", "assistant")
-                                        Voice.piper_speak("Yes, I'm here.")
+                                            self.ui.display_message(response, "assistant")
+                                        Voice.piper_speak(response)
                                         self.is_listening = True
                                         self.speech_buffer = []
+                                        self.last_speech_time = time.time()
                                         continue
 
                                 # Process speech while listening
                                 if self.is_listening:
                                     # Check for stop words
                                     if any(stop_word in text for stop_word in self.stop_words):
-                                        print(f"\n[{timestamp}] Stop word detected. Going to sleep.")
+                                        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Stop word detected. Going to sleep.")
                                         if self.ui:
-                                            self.ui.display_message(f"Ian: {text}", "user")
-                                        # Process the goodbye through normal flow with UI instance
-                                        response = self.callback("goodbye")  # UI instance included in callback
+                                            self.ui.display_message(f"{text}", "user")
+                                        # Pass "goodbye" to process_message to trigger proper shutdown sequence
+                                        self.callback("goodbye")
                                         self.is_listening = False
                                         self.speech_buffer = []
-                                        # Wait for voice response to complete
                                         while not voice_queue.empty():
                                             time.sleep(0.1)
-                                        return  # Exit the process_audio method
-
-                                    # Process normal conversation
-                                    if len(text) > 3:  # Ignore very short sounds
+                                        return
+                                    
+                                    # Add speech to buffer if it's not too short
+                                    if len(text.split()) > 1:  # Only add if more than one word
+                                        print(f"\nAdding to speech buffer: {text}")  # Debug buffer additions
                                         self.last_speech_time = time.time()
                                         self.speech_buffer.append(text)
 
@@ -139,42 +169,59 @@ class VoiceTranscriber:
                         
                         # Display the user's complete utterance in the UI
                         if self.ui:
-                            self.ui.display_message(f"Ian: {complete_utterance}", "user")
+                            self.ui.display_message(f"{complete_utterance}", "user")
                         
                         self.speech_buffer = []
                         
                         # Temporarily stop listening while processing
                         self.is_listening = False
                         
-                        # Process the message and get response
-                        response = self.callback(complete_utterance)
-
-                        #display the response in the UI
-                        if self.ui:
-                            self.ui.display_message(f"F.R.E.D.: {response}", "assistant")
-                        
-                        # Wait for voice response to complete
-                        while not voice_queue.empty():
-                            time.sleep(0.1)
+                        try:
+                            # Process the message and get response
+                            print("\nProcessing message through callback...")
+                            self.is_speaking = True
+                            response = self.callback(complete_utterance)
                             
-                        # Resume listening after response
-                        self.is_listening = True
-                        print("\nListening for next input...")
+                            # Display the response in the UI
+                            if self.ui:
+                                self.ui.display_message(f"{response}", "assistant")
+                            
+                            # Wait for voice response to complete
+                            while not voice_queue.empty():
+                                time.sleep(0.1)
+                                
+                            self.is_speaking = False
+                            
+                            # Resume listening after response
+                            self.is_listening = True
+                            print("\nListening for next input...")
+                        except Exception as e:
+                            print(f"\nError in callback processing: {str(e)}")
+                            self.is_listening = True  # Ensure we resume listening even if there's an error
 
             time.sleep(0.1)
+
+    def calibrate_silence_threshold(self):
+        """Calibrate the silence threshold based on ambient noise"""
+        print("Calibrating microphone... Please remain quiet.")
+        start_time = time.time()
+        
+        while time.time() - start_time < self.calibration_duration:
+            if not self.audio_queue.empty():
+                audio_data = self.audio_queue.get()
+                audio_level = np.abs(audio_data).mean()
+                self.calibration_samples.append(audio_level)
+        
+        if self.calibration_samples:
+            # Set threshold slightly above the average ambient noise
+            self.silence_threshold = np.mean(self.calibration_samples) * 1.1
+            print(f"Silence threshold calibrated to: {self.silence_threshold:.6f}")
 
     def start(self):
         """Start the voice transcription system"""
         if not self.is_running:
             self.is_running = True
             self.terminate_event.clear()
-
-            # Start processing thread
-            self.process_thread = threading.Thread(
-                target=self.process_audio,
-                daemon=True
-            )
-            self.process_thread.start()
 
             # Start audio stream
             self.stream = sd.InputStream(
@@ -184,6 +231,16 @@ class VoiceTranscriber:
                 blocksize=self.blocksize
             )
             self.stream.start()
+
+            # Calibrate silence threshold
+            self.calibrate_silence_threshold()
+
+            # Start processing thread
+            self.process_thread = threading.Thread(
+                target=self.process_audio,
+                daemon=True
+            )
+            self.process_thread.start()
 
             print("\nVoice system initialized. Waiting for wake word...")
 
@@ -196,6 +253,13 @@ class VoiceTranscriber:
             self.process_thread.join()
             self.is_running = False
             self.is_listening = False
+
+    def callback(self, text):
+        """Enhanced callback to handle speaking state"""
+        self.is_speaking = True
+        response = self.callback(text)
+        self.is_speaking = False
+        return response
 
 def initialize_voice_system(callback_function):
     """Initialize and return a voice transcriber instance"""
