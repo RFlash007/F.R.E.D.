@@ -13,6 +13,7 @@ import sys
 import logging
 import json
 from datetime import datetime
+import os
 
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
@@ -27,6 +28,31 @@ def shutdown_app(current_ui):
         current_ui.root.destroy()
     sys.exit(0)
 
+
+def save_conversation(conversation_history):
+    """Save conversation history to JSON files"""
+    try:
+        # Create conversation_history directory if it doesn't exist
+        history_dir = "conversation_history"
+        os.makedirs(history_dir, exist_ok=True)
+        
+        # Save to both current session and archive
+        current_session = os.path.join(history_dir, "current_session.json")
+        archive_file = os.path.join(
+            history_dir,
+            f"archive_{datetime.now().strftime('%Y%m%d')}.json"
+        )
+        
+        # Save to both files
+        with open(current_session, 'w', encoding='utf-8') as f:
+            json.dump(conversation_history, f, indent=2)
+        with open(archive_file, 'w', encoding='utf-8') as f:
+            json.dump(conversation_history, f, indent=2)
+            
+        return True
+    except Exception as e:
+        print(f"Error saving conversation history: {str(e)}")
+        return False
 
 
 def process_message(user_input, ui_instance=None):
@@ -46,6 +72,9 @@ def process_message(user_input, ui_instance=None):
         Semantic.create_semantic(summary)
         Episodic.update_episodic(summary)
         Semantic.update_semantic(summary)
+        
+        # Save conversation history
+        save_conversation(conversation)
 
         if ui_instance:
             ui_instance.display_message("F.R.E.D.: Goodbye for now.", "assistant")
@@ -542,35 +571,31 @@ def perspective_summary(input_data: str) -> tuple[str, str]:
 
     # Create enhanced prompts that preserve context
     user_prompt = """
-    You are a Conversation Context Analyzer. Create a concise summary of the user's perspective,
-    maintaining key points and context of their queries and responses.
+    ###INSTRUCTIONS###
+    Combine all my messages into one natural message, as if I'm asking everything at once.
+    Keep my original tone and style.
     
-    Guidelines:
-    1. Focus on the user's main questions and concerns
-    2. Preserve the chronological flow of their inquiries
-    3. Include any specific preferences or requirements mentioned
-    4. Highlight unresolved queries or ongoing discussions
+    ###FORMAT EXAMPLE### 
+    "Hey, I'm working on X and need help with a few things. Could you explain how Y works? Also wondering about Z..."
     
-    Context:
+    ###MESSAGES###
     {context}
     
-    ###RETURN ONLY THE SUMMARY###
+    ###RETURN ONLY THE MESSAGE###
     """.format(context=json.dumps(user_context, indent=2))
 
     assistant_prompt = """
-    You are a Conversation Context Analyzer. Create a concise summary of the assistant's perspective,
-    maintaining key points and the context of responses.
+    ###INSTRUCTIONS###
+    Combine all your responses into one natural reply that addresses everything.
+    Keep your original helpful tone.
     
-    Guidelines:
-    1. Focus on key information provided and solutions offered
-    2. Maintain context of what questions were being answered
-    3. Track any ongoing tasks or unresolved items
-    4. Note any learned preferences or important user context
+    ###FORMAT EXAMPLE###
+    "Here's what you need to know about X. For Y, the process works like this... Regarding Z..."
     
-    Context:
+    ###MESSAGES###
     {context}
     
-    ###RETURN ONLY THE SUMMARY###
+    ###RETURN ONLY THE REPLY###
     """.format(context=json.dumps(assistant_context, indent=2))
 
     try:

@@ -41,7 +41,6 @@ class ChatUI:
         self._start_msg_checker()
         
         # Keyboard shortcuts
-        self.root.bind("<Control-s>", lambda e: self._save_conversation())
         self.root.bind("<Control-c>", lambda e: self._clear_chat())
         self.root.bind("<Control-q>", lambda e: self.root.quit())
 
@@ -74,7 +73,6 @@ class ChatUI:
         file_menu = tk.Menu(menubar, tearoff=0, bg='#1a2433', fg='#00bfff',
                            activebackground='#2a3443', activeforeground='#00dfff')
         menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Save Conversation", command=self._save_conversation)
         file_menu.add_command(label="Clear Chat", command=self._clear_chat)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
@@ -430,7 +428,6 @@ class ChatUI:
     def create_action_buttons(self):
         actions = [
             ("🔍 SCAN", lambda: self._on_send(None, "Scan systems"), "Analyze system status"),
-            ("💾 SAVE", self._save_conversation, "Save current conversation"),
             ("🔄 RESET", self._clear_chat, "Clear current session")
         ]
         
@@ -734,10 +731,6 @@ class ChatUI:
                 "timestamp": datetime.now().isoformat()
             })
             
-            # Auto-save current session
-            with open("current_session.json", "w", encoding="utf-8") as f:
-                json.dump(self.conversation_history, f, indent=2)
-            
             self.input_field.delete(0, tk.END)
             
             threading.Thread(
@@ -755,7 +748,6 @@ class ChatUI:
                 "content": response,
                 "timestamp": datetime.now().isoformat()
             })
-            self._save_conversation_history()  # Auto-save history
             self.status_bar.config(text="Ready")
         except Exception as e:
             self.msg_queue.put(("error", f"An error occurred: {str(e)}"))
@@ -764,33 +756,6 @@ class ChatUI:
             self.root.after(0, lambda: self.input_field.configure(state='normal'))
             self.root.after(0, lambda: self.send_button.configure(state='normal'))
             self.root.after(0, lambda: self.input_field.focus_set())
-    
-    def _save_conversation(self, event=None):
-        """Save the current conversation as a formatted log"""
-        if not self.conversation_history:
-            self.status_bar.config(text="No conversation to save")
-            return
-        
-        try:
-            # Create logs directory
-            os.makedirs("logs", exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join("logs", f"FRED_log_{timestamp}.txt")
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write("F.R.E.D. Interaction Log\n")
-                f.write("=" * 50 + "\n\n")
-                f.write(f"Session: {timestamp}\n\n")
-                
-                for msg in self.conversation_history:
-                    time = datetime.fromisoformat(msg['timestamp']).strftime("%H:%M:%S")
-                    sender = "Ian" if msg['role'] == "user" else "F.R.E.D."
-                    f.write(f"[{time}] {sender}:\n{msg['content']}\n\n")
-            
-            self.status_bar.config(text=f"Log saved: {filename}")
-            
-        except Exception as e:
-            self.status_bar.config(text=f"Error saving log: {str(e)}")
     
     def _clear_chat(self, event=None):
         if messagebox.askyesno("Clear Chat", "Are you sure you want to clear the chat?"):
@@ -841,6 +806,10 @@ class ChatUI:
             font=("Rajdhani", 11)
         )
         
+        # Add null check at the beginning
+        if message is None:
+            message = "Empty message"
+        
         type_message(message)
     
     def _update_time(self):
@@ -874,42 +843,6 @@ class ChatUI:
         self.root.geometry(f'+{x}+{y}')
         
         self.root.mainloop()
-
-    def _save_conversation_history(self):
-        """Save conversation history to a JSON file"""
-        history_dir = "conversation_history"
-        os.makedirs(history_dir, exist_ok=True)
-        
-        # Save to both current session and archive
-        current_session = os.path.join(history_dir, "current_session.json")
-        archive_file = os.path.join(
-            history_dir,
-            f"archive_{datetime.now().strftime('%Y%m%d')}.json"
-        )
-        
-        try:
-            with open(current_session, 'w', encoding='utf-8') as f:
-                json.dump(self.conversation_history, f, indent=2)
-            with open(archive_file, 'w', encoding='utf-8') as f:
-                json.dump(self.conversation_history, f, indent=2)
-        except Exception as e:
-            self.status_bar.config(text=f"Error saving history: {str(e)}")
-
-    def _load_conversation_history(self):
-        """Load conversation history from JSON file"""
-        history_dir = "conversation_history"
-        current_session = os.path.join(history_dir, "current_session.json")
-        
-        try:
-            if os.path.exists(current_session):
-                with open(current_session, 'r', encoding='utf-8') as f:
-                    self.conversation_history = json.load(f)
-                    
-                # Replay loaded messages
-                for msg in self.conversation_history:
-                    self.display_message(msg['content'], msg['role'])
-        except Exception as e:
-            self.status_bar.config(text=f"Error loading history: {str(e)}")
 
     def _create_tech_pattern(self):
         """Create a tech pattern overlay for the chat area"""
