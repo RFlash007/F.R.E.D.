@@ -1,5 +1,6 @@
 import ollama
 from duckduckgo_search import DDGS
+import Dreaming
 import Tools
 import Voice
 import Semantic
@@ -63,7 +64,7 @@ def process_message(user_input, ui_instance=None):
     # 1. Attempt to recall episodic & semantic memories relevant to the user_input
     episodic_memories = Episodic.recall_episodic(user_input)
     semantic_memories = Semantic.recall_semantic(user_input)
-
+    assumptions = Dreaming.recall_assumptions(user_input)
     # 2. If user wants to end the conversation
     if user_input.lower() == "goodbye":
         summary = summarize(conversation)
@@ -72,7 +73,7 @@ def process_message(user_input, ui_instance=None):
         Semantic.create_semantic(summary)
         Episodic.update_episodic(summary)
         Semantic.update_semantic(summary)
-        
+        Dreaming.update_assumptions()
         # Save conversation history
         save_conversation(conversation)
 
@@ -84,14 +85,12 @@ def process_message(user_input, ui_instance=None):
 
     # 3. Create user prompt with no tools
     user_prompt = (
-        f"{user_input}\n\n"
-        "(END OF USER INPUT)\n\n"
+        f"{user_input}\n\n(END OF USER INPUT)\n\n"
         f"The current time and date is: {Tools.get_time()}\n"
-        "These are your memories that may help answer the user's question. "
-        "Reference them only if they are directly helpful:\n"
-        f"{episodic_memories}\n\n"
-        "Here are facts from your memory. Reference them only if they are directly helpful:\n"
-        f"{semantic_memories}"
+        f"These are your memories that may help answer the user's question. Reference them only if they are directly helpful:\n{episodic_memories}\n\n"
+        f"Here are facts from your memory. Reference them only if they are directly helpful:\n{semantic_memories}"
+        f"These are your assumptions. Reference them only if they are directly helpful:\n{assumptions}\n"
+        "(END OF FRED DATABASE)"
     )
 
     conversation.append({"role": "user", "content": user_prompt})
@@ -422,16 +421,13 @@ def process_message(user_input, ui_instance=None):
         if tool_answer is not None:
             # The model used a tool. Let's incorporate the result into the next prompt.
             user_prompt = (
-                f"{user_input}\n\n"
-                "(END OF USER INPUT)\n\n"
+                f"{user_input}\n\n(END OF USER INPUT)\n\n"
                 f"The current time and date is: {Tools.get_time()}\n"
-                "Relevant info from the tool:\n"
-                f"{tool_answer}\n\n"
-                "These are your memories that may help answer the user's question. "
-                "Reference them only if they are directly helpful:\n"
-                f"{episodic_memories}\n\n"
-                "Here are facts from your memory. Reference them only if they are directly helpful:\n"
-                f"{semantic_memories}"
+                f"Relevant info from the tool:\n{tool_answer}\n\n"
+                f"These are your memories that may help answer the user's question. Reference them only if they are directly helpful:\n{episodic_memories}\n\n"
+                f"Here are facts from your memory. Reference them only if they are directly helpful:\n{semantic_memories}"
+                f"These are your assumptions. Reference them only if they are directly helpful:\n{assumptions}\n"
+                "(END OF FRED DATABASE)"
             )
             # Replace the last user prompt with the updated info
             conversation.pop()
@@ -616,9 +612,8 @@ def perspective_summary(input_data: str) -> tuple[str, str]:
         assistant_summary = assistant_response['message']['content']
 
         # Add metadata to help with future context
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        user_summary = f"[Summary as of {timestamp}]\n{user_summary}"
-        assistant_summary = f"[Summary as of {timestamp}]\n{assistant_summary}"
+        user_summary = f"\n{user_summary}"
+        assistant_summary = f"\n{assistant_summary}"
 
         return user_summary, assistant_summary
 
@@ -695,7 +690,11 @@ if __name__ == "__main__":
     # Get the system prompt
     prompt = Procedural.get_prompt()
     final_prompt = " ".join(prompt.splitlines())
-        
+
+    Semantic.initialize_cache()  # Initialize semantic cache
+    Episodic.initialize_cache()   # Initialize episodic cache
+    Dreaming.initialize_cache()   # Initialize dreams cache
+
     # Define the modelfile with system prompt and increased context
     modelfile = f'''
     FROM huihui_ai/qwen2.5-abliterate:14b
