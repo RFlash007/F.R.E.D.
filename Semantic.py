@@ -46,7 +46,17 @@ def initialize_cache():
         torch.save({"embeddings": [], "last_modified": 0}, EMBEDDINGS_CACHE)
     if not os.path.exists(FACTS_FILE):
         with open(FACTS_FILE, 'w', encoding='utf-8') as f:
-            pass  # Create empty file if it doesn't exist
+            pass
+    
+    # Direct cache population
+    try:
+        if os.path.getsize(FACTS_FILE) > 0:
+            facts = [Fact.from_json(line) for line in open(FACTS_FILE) if line.strip()]
+            fact_texts = [f"[{f.category}] {f.content}" for f in facts]
+            embeddings = batch_embed_texts(fact_texts)
+            save_embeddings_cache(embeddings)
+    except Exception as e:
+        logging.error(f"Cache initialization failed: {e}")
 
 def load_cached_embeddings():
     """
@@ -254,7 +264,6 @@ def recall_semantic(query: str, top_k: int = 2) -> list:
         return []
 
     try:
-        initialize_cache()
 
         # Load and preprocess facts
         with open(FACTS_FILE, 'r', encoding='utf-8') as file:

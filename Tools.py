@@ -10,6 +10,9 @@ from duckduckgo_search import DDGS
 
 import Projects
 
+# NEW: Import DeepResearch
+import DeepResearch
+
 logging.basicConfig(level=logging.ERROR)
 
 def get_time() -> str:
@@ -206,7 +209,9 @@ available_functions = {
     'edit_file_in_project': Projects.edit_file_in_project,
     'add_task': Task.add_task,
     'read_task': Task.read_task,
-    'delete_task': Task.delete_task
+    'delete_task': Task.delete_task,
+    # NEW: Add deep_research tool function
+    'deep_research': DeepResearch.perform_research
 }
 
 
@@ -337,6 +342,17 @@ def handle_tool_calls(response, user_input):
                 results.append(outcome)
             except Exception as e:
                 err_msg = f"Failed calling delete_task: {e}"
+                print(err_msg)
+                results.append(err_msg)
+        elif function_name == 'deep_research':
+            try:
+                research_query = tool_args.get('research_query')
+                if research_query is None:
+                    raise ValueError("Missing required research_query")
+                outcome = function(research_query)
+                results.append(outcome)
+            except Exception as e:
+                err_msg = f"Failed calling deep_research: {e}"
                 print(err_msg)
                 results.append(err_msg)
         else:

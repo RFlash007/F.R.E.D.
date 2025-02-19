@@ -34,7 +34,7 @@ class ChatUI:
         self.chat_callback = chat_callback
         self.conversation_history = []
         
-        # Create styles
+        # Create custom styles and widgets
         self._create_styles()
         self._create_widgets()
         self._setup_layout()
@@ -46,26 +46,37 @@ class ChatUI:
 
     def _create_styles(self):
         style = ttk.Style()
+        # Use a modern theme as a base; clam works well for custom colors
+        style.theme_use('clam')
+        
+        # Main frames styling
         style.configure('Neural.TFrame', background='#0a1520')
         style.configure('Sidebar.TFrame', background='#0d1a2a')
         style.configure('TSeparator', background='#00bfff')
         
+        # Action buttons styling with futuristic look
         style.configure('Action.TButton',
-                       font=('Rajdhani', 11),
-                       padding=8,
-                       background='#0d1a2a',
-                       foreground='#00bfff')
-        
-        style.configure('Neural.TEntry',
-                       fieldbackground='#0d1a2a',
-                       foreground='#00bfff',
-                       insertcolor='#00bfff',
-                       borderwidth=0)
-        
+                        font=('Rajdhani', 11, 'bold'),
+                        padding=8,
+                        background='#0d1a2a',
+                        foreground='#00bfff')
         style.map('Action.TButton',
-                 background=[('active', '#102030')],
-                 foreground=[('active', '#00dfff')])
-    
+                  background=[('active', '#102030')],
+                  foreground=[('active', '#00dfff')])
+        
+        # Entry field styling with neon effects
+        style.configure('Neural.TEntry',
+                        fieldbackground='#0d1a2a',
+                        foreground='#00bfff',
+                        insertcolor='#00dfff',
+                        borderwidth=0)
+        
+        # Custom label style for headers and status
+        style.configure('Neural.TLabel',
+                        background='#0a1520',
+                        foreground='#00bfff',
+                        font=('Rajdhani', 11))
+        
     def _create_menu(self):
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
@@ -84,7 +95,7 @@ class ChatUI:
         edit_menu.add_command(label="Paste", command=lambda: self.input_field.event_generate("<<Paste>>"))
     
     def _create_header(self):
-        """Create header with minimal clean design"""
+        """Create header with minimal clean design and animated time display"""
         self.header_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
         
         # Time display with pulsing separator
@@ -93,7 +104,7 @@ class ChatUI:
             text="",
             foreground='#00bfff',
             background='#0a1520',
-            font=('Rajdhani', 12)
+            font=('Rajdhani', 12, 'bold')
         )
         self.time_label.pack(side='right', padx=10)
         self._update_time()
@@ -114,7 +125,7 @@ class ChatUI:
             bg='#0d1a2a',
             highlightthickness=0
         )
-        # Create enhanced reactor logo
+        # Enhanced reactor logo with additional glow and particle effects
         self.create_reactor_logo()
         
         self.sidebar_title = ttk.Label(
@@ -135,7 +146,7 @@ class ChatUI:
         self._create_menu()
         self._create_header()
         
-        # Chat display with custom scrollbar
+        # Chat display with custom scrollbar and futuristic font
         self.chat_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
         self.chat_display = scrolledtext.ScrolledText(
             self.chat_frame,
@@ -145,13 +156,12 @@ class ChatUI:
             font=("Consolas", 11),
             bg='#0d1a2a',
             fg='#00bfff',
-            insertbackground='#00bfff',
+            insertbackground='#00dfff',
             relief='flat',
             borderwidth=0,
             padx=20,
             pady=20
         )
-        
         # Custom scrollbar styling
         self.chat_display.vbar.configure(
             troughcolor='#0a1520',
@@ -176,7 +186,7 @@ class ChatUI:
         )
         self.input_field.bind("<Return>", self._on_send)
         
-        # Holographic send button
+        # Holographic send button with neon glow effect
         self.send_button = tk.Button(
             self.input_frame,
             text="TRANSMIT",
@@ -192,8 +202,6 @@ class ChatUI:
             cursor='hand2',
             bd=0
         )
-        
-        # Add hover effect to send button
         self.send_button.bind("<Enter>", self._on_button_hover)
         self.send_button.bind("<Leave>", self._on_button_leave)
         
@@ -202,12 +210,10 @@ class ChatUI:
         self.status_bar = ttk.Label(
             self.status_frame,
             text="SYSTEMS READY",
-            style='Neural.TFrame',
-            foreground='#00bfff',
-            font=('Rajdhani', 10)
+            style='Neural.TLabel'
         )
         
-        # Create particle canvas for thinking animation
+        # Create particle canvas for thinking animation (overlayed on chat area)
         self.particle_canvas = tk.Canvas(
             self.chat_frame,
             bg='#0d1a2a',
@@ -216,7 +222,7 @@ class ChatUI:
             height=50
         )
         
-        # Create voice feedback indicator
+        # Voice feedback indicator with pulsating neon ring
         self.voice_indicator = tk.Canvas(
             self.input_frame,
             width=20,
@@ -232,7 +238,7 @@ class ChatUI:
             tags='voice_ring'
         )
         
-        # Add neural network visualization
+        # Add neural network visualization with dynamic neon nodes
         self.neural_canvas = tk.Canvas(
             self.chat_frame,
             bg='#0d1a2a',
@@ -242,7 +248,7 @@ class ChatUI:
         )
         self._create_neural_network()
         
-        # Add environment analysis display
+        # Environment analysis display with updated neon bars
         self.env_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
         self.env_canvas = tk.Canvas(
             self.env_frame,
@@ -253,10 +259,9 @@ class ChatUI:
         )
         self._create_env_display()
         
-        # Add visualization overlays
+        # Visualization overlays – hexagonal grid background and data stream effect
         self.visualization_frame = ttk.Frame(self.chat_frame, style='Neural.TFrame')
         
-        # Create hexagonal grid background
         self.hex_canvas = tk.Canvas(
             self.visualization_frame,
             bg='#0d1a2a',
@@ -265,7 +270,6 @@ class ChatUI:
         )
         self._create_hex_grid()
         
-        # Add data stream effect
         self.stream_canvas = tk.Canvas(
             self.visualization_frame,
             bg='#0d1a2a',
@@ -275,7 +279,7 @@ class ChatUI:
         )
         self._create_data_stream()
         
-        # Add frequency analyzer visualization
+        # Frequency analyzer visualization for added tech flair
         self.freq_canvas = tk.Canvas(
             self.chat_frame,
             bg='#0d1a2a',
@@ -285,7 +289,7 @@ class ChatUI:
         self._create_frequency_analyzer()
 
     def create_reactor_logo(self):
-        """Create an enhanced 3D Arc Reactor inspired logo"""
+        """Create an enhanced 3D Arc Reactor inspired logo with glowing, rotating layers"""
         center_x, center_y = 100, 100
         self.reactor_layers = []
         
@@ -297,15 +301,15 @@ class ChatUI:
                 'z': i * 10,  # Z-depth for 3D effect
                 'rotation': random.random() * 360
             }
-            
-            # Create rings for this layer
+            # Adjust radius for each layer to add depth and glow
             radius = 40 - (i * 5)
             for j in range(3):
+                # Draw multiple overlapping arcs for a glowing effect
                 ring = self.logo_canvas.create_arc(
-                    center_x - radius - (j * 5),
-                    center_y - radius - (j * 5),
-                    center_x + radius + (j * 5),
-                    center_y + radius + (j * 5),
+                    center_x - radius - (j * 3),
+                    center_y - radius - (j * 3),
+                    center_x + radius + (j * 3),
+                    center_y + radius + (j * 3),
                     start=0,
                     extent=300,
                     outline=self._adjust_color_brightness('#00bfff', 0.7 - (i * 0.1)),
@@ -313,8 +317,7 @@ class ChatUI:
                     style='arc'
                 )
                 layer['rings'].append(ring)
-            
-            # Add particles orbiting this layer
+            # Add orbiting particles with subtle oscillations
             for _ in range(6):
                 angle = random.random() * 360
                 particle = self.logo_canvas.create_oval(
@@ -328,10 +331,9 @@ class ChatUI:
                     'speed': 1 + random.random() * 2,
                     'radius': radius
                 })
-            
             self.reactor_layers.append(layer)
         
-        # Create core elements
+        # Create core elements with pulsating neon glow
         self.reactor_core = {
             'inner': self.logo_canvas.create_oval(
                 center_x - 15, center_y - 15,
@@ -348,8 +350,6 @@ class ChatUI:
             ),
             'energy_rings': []
         }
-        
-        # Add pulsing energy rings
         for i in range(3):
             ring = self.logo_canvas.create_oval(
                 center_x - 25 - (i * 5),
@@ -365,55 +365,40 @@ class ChatUI:
         self._animate_enhanced_reactor()
 
     def _animate_enhanced_reactor(self):
-        """Animate the enhanced reactor with 3D effects"""
+        """Animate the enhanced reactor with rotating layers, orbiting particles and pulsating core"""
         if not hasattr(self, 'reactor_layers'):
             return
             
         center_x, center_y = 100, 100
         t = time.time()
         
-        # Animate each layer
         for layer in self.reactor_layers:
-            # Rotate rings
-            layer['rotation'] += 0.5 * (1 + layer['z'] / 50)  # Layers rotate at different speeds
+            layer['rotation'] += 0.5 * (1 + layer['z'] / 50)
             for ring in layer['rings']:
-                self.logo_canvas.itemconfig(
-                    ring,
-                    start=layer['rotation']
-                )
-            
-            # Animate particles
+                self.logo_canvas.itemconfig(ring, start=layer['rotation'])
             for particle in layer['particles']:
                 particle['angle'] += particle['speed']
-                # Calculate 3D projection
                 x = center_x + math.cos(math.radians(particle['angle'])) * particle['radius']
                 y = center_y + math.sin(math.radians(particle['angle'])) * particle['radius'] * 0.3
-                
-                # Add subtle vertical oscillation
                 y += math.sin(t * 2 + particle['angle']) * 5
-                
                 self.logo_canvas.coords(
                     particle['id'],
                     x - 2, y - 2, x + 2, y + 2
                 )
-                
-                # Adjust particle opacity based on position
                 opacity = 0.5 + math.sin(math.radians(particle['angle'])) * 0.5
                 color = self._adjust_color_brightness('#00bfff', opacity)
                 self.logo_canvas.itemconfig(particle['id'], fill=color, outline=color)
         
-        # Animate core
+        # Core pulsing effect
         core_pulse = abs(math.sin(t * 2)) * 0.3 + 0.7
         core_color = self._adjust_color_brightness('#00bfff', core_pulse)
         self.logo_canvas.itemconfig(self.reactor_core['inner'], fill=core_color, outline=core_color)
         
-        # Animate energy rings
+        # Energy rings pulsate and scale for a dynamic effect
         for i, ring in enumerate(self.reactor_core['energy_rings']):
             ring_pulse = abs(math.sin(t * 2 + i * math.pi / 3))
             ring_color = self._adjust_color_brightness('#00bfff', ring_pulse * 0.5)
             self.logo_canvas.itemconfig(ring, outline=ring_color)
-            
-            # Scale rings for pulsing effect
             scale = 1 + ring_pulse * 0.1
             self.logo_canvas.coords(
                 ring,
@@ -442,8 +427,6 @@ class ChatUI:
                 style='Action.TButton'
             )
             btn.pack(fill='x')
-            
-            # Create tooltip
             self._create_tooltip(btn, tooltip)
 
     def _create_tooltip(self, widget, text):
@@ -453,7 +436,6 @@ class ChatUI:
             x += widget.winfo_rootx() + 25
             y += widget.winfo_rooty() + 20
             
-            # Create tooltip window
             self.tooltip = tk.Toplevel(widget)
             self.tooltip.wm_overrideredirect(True)
             self.tooltip.wm_geometry(f"+{x}+{y}")
@@ -478,107 +460,62 @@ class ChatUI:
         widget.bind('<Leave>', leave)
 
     def _on_button_hover(self, event):
-        self.send_button.configure(
-            bg='#102030',
-            fg='#00dfff'
-        )
+        self.send_button.configure(bg='#102030', fg='#00dfff')
 
     def _on_button_leave(self, event):
-        self.send_button.configure(
-            bg='#0d1a2a',
-            fg='#00bfff'
-        )
+        self.send_button.configure(bg='#0d1a2a', fg='#00bfff')
 
     def _update_metrics(self):
-        """Update system metrics with smooth animations"""
+        """Update system metrics with smooth animations (if metrics widgets exist)"""
         import psutil
-        
-        # Get current metrics
         cpu = psutil.cpu_percent()
         memory = psutil.virtual_memory().percent
         
-        # Smoothly animate CPU bar
         current_cpu_width = self.cpu_canvas.coords(self.cpu_bar)[2]
         target_cpu_width = (cpu / 100) * 100
         delta_cpu = (target_cpu_width - current_cpu_width) * 0.2
         
-        self.cpu_canvas.coords(
-            self.cpu_bar,
-            0, 0,
-            current_cpu_width + delta_cpu, 15
-        )
-        
-        # Smoothly animate memory bar
+        self.cpu_canvas.coords(self.cpu_bar, 0, 0, current_cpu_width + delta_cpu, 15)
         current_mem_width = self.memory_canvas.coords(self.memory_bar)[2]
         target_mem_width = (memory / 100) * 100
         delta_mem = (target_mem_width - current_mem_width) * 0.2
         
-        self.memory_canvas.coords(
-            self.memory_bar,
-            0, 0,
-            current_mem_width + delta_mem, 15
-        )
-        
-        # Update labels
+        self.memory_canvas.coords(self.memory_bar, 0, 0, current_mem_width + delta_mem, 15)
         self.cpu_label.config(text=f"CPU {cpu:.0f}%")
         self.memory_label.config(text=f"MEM {memory:.0f}%")
-        
-        # Pulse the status circle
         self._pulse_status_circle()
-        
         self.root.after(100, self._update_metrics)
     
     def _pulse_status_circle(self):
-        # Create a pulsing effect
         t = time.time() * 2
         pulse = abs(math.sin(t)) * 0.3 + 0.7
-        
-        # Update circle color
         color = self._adjust_color_brightness('#00bfff', pulse)
         self.status_canvas.itemconfig(self.status_circle, fill=color, outline=color)
 
     def _adjust_color_brightness(self, color, factor):
-        # Convert hex to RGB
+        # Convert hex to RGB and adjust brightness
         r = int(color[1:3], 16)
         g = int(color[3:5], 16)
         b = int(color[5:7], 16)
-        
-        # Adjust brightness
-        r = int(r * factor)
-        g = int(g * factor)
-        b = int(b * factor)
-        
-        # Convert back to hex
+        r = min(255, max(0, int(r * factor)))
+        g = min(255, max(0, int(g * factor)))
+        b = min(255, max(0, int(b * factor)))
         return f'#{r:02x}{g:02x}{b:02x}'
 
     def _setup_layout(self):
         self.container.pack(expand=True, fill='both')
-        
-        # Sidebar layout
         self.sidebar.pack(side='left', fill='y')
-        
-        # Logo and title at the top of sidebar
         self.logo_frame.pack(fill='x', pady=(10, 5))
         self.logo_canvas.pack(expand=True)
         self.sidebar_title.pack(fill='x', pady=(0, 10), padx=20)
-        
-        # Add separator
         ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', padx=10, pady=5)
-        
-        # Action buttons at bottom of sidebar
         self.actions_frame.pack(fill='x', pady=10, side='bottom')
-        
-        # Main content layout
         self.main_frame.pack(side='left', expand=True, fill='both')
-        
-        # Simple header with time
         self.header_frame.pack(fill='x', pady=(0, 10))
-        
-        # Chat area with enhanced visuals
         self.chat_frame.pack(expand=True, fill='both', pady=(0, 20))
         self.chat_display.pack(expand=True, fill='both')
         
-        # Add tech pattern overlay
+        # Tech overlay pattern
         self.overlay_canvas = tk.Canvas(
             self.chat_frame,
             bg='#0d1a2a',
@@ -589,39 +526,22 @@ class ChatUI:
         self.overlay_canvas.place(x=0, y=0, relwidth=1)
         self._create_tech_pattern()
         
-        # Add data stream effect on the right side
+        # Data stream effect and hex grid overlays
         self.stream_canvas.place(relx=1, rely=0, anchor='ne', relheight=1)
-        
-        # Add hex grid background
         self.hex_canvas.place(relx=1, rely=0, anchor='ne', relwidth=0.2, relheight=1)
         
-        # Input area with glowing border
         self.input_container.pack(fill='x', padx=20, pady=10)
         self.input_frame.pack(fill='x', expand=True)
-        
-        # Create glowing border effect
-        self.input_border = tk.Canvas(
-            self.input_frame,
-            height=2,
-            bg='#0a1520',
-            highlightthickness=0
-        )
+        self.input_border = tk.Canvas(self.input_frame, height=2, bg='#0a1520', highlightthickness=0)
         self.input_border.pack(fill='x', side='bottom')
-        
         self.input_field.pack(side='left', expand=True, fill='x', padx=(0, 10))
         self.send_button.pack(side='right')
-        
-        # Status bar
         self.status_frame.pack(fill='x', pady=(10, 0))
         self.status_bar.pack(side='left')
         
-        # Bind events
         self.input_field.bind("<FocusIn>", self._start_border_animation)
         self.input_field.bind("<FocusOut>", self._stop_border_animation)
-        
         self.input_field.focus_set()
-        
-        # Start animations
         self._start_animations()
 
     def _start_animations(self):
@@ -632,88 +552,23 @@ class ChatUI:
         self._animate_data_stream()
 
     def _animate_border(self):
-        """Animate the input border with a flowing effect"""
+        """Animate the input border with a flowing neon effect"""
         if hasattr(self, '_border_animation_active') and self._border_animation_active:
             width = self.input_border.winfo_width()
             t = time.time() * 2
-            
-            # Create flowing effect
             for i in range(3):
                 offset = i * width / 3
                 x = (t + offset) % width
                 opacity = abs(math.sin(x / width * math.pi))
                 color = self._adjust_color_brightness('#00bfff', opacity * 0.7 + 0.3)
-                
-                self.input_border.create_line(
-                    x, 0, x + width/6, 0,
-                    fill=color,
-                    width=2
-                )
-            
-            # Clean up old lines
-            self.input_border.delete('flow')
-            
+                self.input_border.create_line(x, 0, x + width/6, 0, fill=color, width=2, tags='flow')
+            self.input_border.delete('old')
         self.root.after(50, self._animate_border)
     
-    def _animate_reactor(self):
-        """Animate the reactor logo with multiple effects"""
-        t = time.time()
-        center_x, center_y = 100, 100
-        radius = 40
-        
-        # Rotate rings at different speeds
-        for i, ring in enumerate(self.reactor_rings):
-            angle = (t * (i + 1) * 30) % 360
-            self.logo_canvas.itemconfig(
-                ring,
-                start=angle
-            )
-        
-        # Pulse the center
-        scale = abs(math.sin(t)) * 0.2 + 0.8
-        glow = abs(math.sin(t * 2)) * 0.3 + 0.7
-        center_color = self._adjust_color_brightness('#00bfff', glow)
-        
-        self.logo_canvas.coords(
-            self.center_circle,
-            center_x - 15 * scale,
-            center_y - 15 * scale,
-            center_x + 15 * scale,
-            center_y + 15 * scale
-        )
-        self.logo_canvas.itemconfig(
-            self.center_circle,
-            fill=center_color,
-            outline=center_color
-        )
-        
-        # Rotate segments
-        for i, segment in enumerate(self.segments):
-            angle = (t * 20 + (i * 45)) % 360
-            self.logo_canvas.itemconfig(
-                segment,
-                start=angle
-            )
-        
-        # Animate scan line
-        scan_y = center_y + math.sin(t * 2) * radius
-        self.logo_canvas.coords(
-            self.scan_line,
-            center_x - radius - 20,
-            scan_y,
-            center_x + radius + 20,
-            scan_y
-        )
-        
-        # Schedule next animation frame
-        self.root.after(50, self._animate_reactor)
-    
     def _start_border_animation(self, event):
-        """Start the border animation when input is focused"""
         self._border_animation_active = True
     
     def _stop_border_animation(self, event):
-        """Stop the border animation when input loses focus"""
         self._border_animation_active = False
         self.input_border.delete('all')
 
@@ -764,7 +619,7 @@ class ChatUI:
             self.status_bar.config(text="Chat cleared")
     
     def display_message(self, message, sender):
-        """Display a message with typing animation effect"""
+        """Display a message with typing animation effect and proper prefixing"""
         self.chat_display.insert(tk.END, "\n\n")
         
         if sender == "user":
@@ -774,7 +629,6 @@ class ChatUI:
         else:
             prefix = "F.R.E.D.: "
         
-        # Add prefix with consistent color
         self.chat_display.insert(tk.END, prefix, f"prefix_{sender}")
         self.chat_display.tag_config(
             f"prefix_{sender}",
@@ -783,10 +637,8 @@ class ChatUI:
         )
         
         if sender == "assistant":
-            # Start thinking animation
             self._start_thinking_animation()
         
-        # Animate message typing
         def type_message(msg, index=0):
             if index < len(msg):
                 self.chat_display.insert(tk.END, msg[index], f"message_{sender}")
@@ -796,85 +648,60 @@ class ChatUI:
                 self.chat_display.insert(tk.END, "\n")
                 self.chat_display.see(tk.END)
                 if sender == "assistant":
-                    # Stop thinking animation
                     self._stop_thinking_animation()
         
-        # Configure message color
         self.chat_display.tag_config(
             f"message_{sender}",
             foreground='#00bfff',
             font=("Rajdhani", 11)
         )
         
-        # Add null check at the beginning
         if message is None:
             message = "Empty message"
         
         type_message(message)
     
     def _update_time(self):
-        """Update time display with pulsing separator"""
+        """Update time display with a blinking separator for a dynamic feel"""
         current_time = datetime.now().strftime("%H:%M:%S")
-        separator = ":" if time.time() % 1 < 0.5 else " "  # Blinking separator
+        separator = ":" if time.time() % 1 < 0.5 else " "
         formatted_time = current_time.replace(":", separator)
-        self.time_label.config(
-            text=formatted_time,
-            foreground='#00bfff'
-        )
+        self.time_label.config(text=formatted_time, foreground='#00bfff')
         self.root.after(500, self._update_time)
     
     def _start_msg_checker(self):
         try:
             while not self.msg_queue.empty():
                 sender, message = self.msg_queue.get_nowait()
-                # Remove the sender prefix since it's already handled in display_message
                 self.display_message(message, sender.lower())
         finally:
             self.root.after(100, self._start_msg_checker)
     
     def run(self):
         self.root.attributes('-alpha', 0.98)
-        
         self.root.update_idletasks()
         width = self.root.winfo_width()
         height = self.root.winfo_height()
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f'+{x}+{y}')
-        
         self.root.mainloop()
 
     def _create_tech_pattern(self):
-        """Create a tech pattern overlay for the chat area"""
+        """Create a futuristic tech overlay pattern"""
         width = self.overlay_canvas.winfo_width()
         height = self.overlay_canvas.winfo_height()
-        
-        # Create hexagonal pattern
         for x in range(0, width, 30):
-            self.overlay_canvas.create_line(
-                x, 0, x, height,
-                fill='#00bfff',
-                width=1,
-                stipple='gray50'
-            )
-        
+            self.overlay_canvas.create_line(x, 0, x, height, fill='#00bfff', width=1, stipple='gray50')
         for y in range(0, height, 30):
-            self.overlay_canvas.create_line(
-                0, y, width, y,
-                fill='#00bfff',
-                width=1,
-                stipple='gray50'
-            )
+            self.overlay_canvas.create_line(0, y, width, y, fill='#00bfff', width=1, stipple='gray50')
 
     def _start_thinking_animation(self):
-        """Create a particle effect animation while FRED is 'thinking'"""
+        """Create particle effect animation while F.R.E.D. is 'thinking'"""
         if not self.particle_canvas:
             return
-            
         self.particle_canvas.place(relx=0.5, rely=0.1, anchor='n')
         self.thinking_active = True
-        
-        # Create initial particles
         for _ in range(10):
             particle = {
                 'x': self.particle_canvas.winfo_width() / 2,
@@ -885,28 +712,20 @@ class ChatUI:
                 'id': None
             }
             self.thinking_particles.append(particle)
-        
         self._animate_thinking_particles()
 
     def _animate_thinking_particles(self):
-        """Animate the thinking particles"""
+        """Animate the thinking particles on the canvas"""
         if not hasattr(self, 'thinking_active') or not self.thinking_active:
             return
-            
         self.particle_canvas.delete('particle')
-        
         for particle in self.thinking_particles:
-            # Update position
             particle['x'] += particle['dx']
             particle['y'] += particle['dy']
-            
-            # Bounce off edges
             if particle['x'] < 0 or particle['x'] > self.particle_canvas.winfo_width():
                 particle['dx'] *= -1
             if particle['y'] < 0 or particle['y'] > self.particle_canvas.winfo_height():
                 particle['dy'] *= -1
-            
-            # Draw particle
             size = particle['size']
             self.particle_canvas.create_oval(
                 particle['x'] - size,
@@ -917,11 +736,10 @@ class ChatUI:
                 outline='',
                 tags='particle'
             )
-        
         self.root.after(50, self._animate_thinking_particles)
 
     def _stop_thinking_animation(self):
-        """Stop the thinking animation"""
+        """Stop the thinking animation and clear particles"""
         self.thinking_active = False
         if self.particle_canvas:
             self.particle_canvas.place_forget()
@@ -932,21 +750,15 @@ class ChatUI:
         """Pulse the voice indicator based on audio level"""
         if not hasattr(self, 'voice_indicator'):
             return
-            
-        # Scale the ring based on audio level
-        scale = 1 + (level * 0.5)  # Adjust multiplier for desired effect
+        scale = 1 + (level * 0.5)
         self.voice_indicator.scale('voice_ring', 10, 10, scale, scale)
-        
-        # Adjust color intensity
         color = self._adjust_color_brightness('#00bfff', 0.5 + level)
         self.voice_indicator.itemconfig('voice_ring', outline=color)
 
     def _create_neural_network(self):
-        """Create a visual representation of neural activity"""
+        """Create a dynamic neural network visualization"""
         self.nodes = []
         self.connections = []
-        
-        # Create nodes
         for i in range(10):
             x = random.randint(20, 130)
             y = random.randint(20, 130)
@@ -961,11 +773,9 @@ class ChatUI:
                 )
             }
             self.nodes.append(node)
-        
-        # Create connections
         for i in range(len(self.nodes)):
             for j in range(i + 1, len(self.nodes)):
-                if random.random() < 0.3:  # 30% chance of connection
+                if random.random() < 0.3:
                     conn = self.neural_canvas.create_line(
                         self.nodes[i]['x'], self.nodes[i]['y'],
                         self.nodes[j]['x'], self.nodes[j]['y'],
@@ -979,41 +789,32 @@ class ChatUI:
                         'id': conn,
                         'activity': random.random()
                     })
-        
         self._animate_neural_network()
 
     def _animate_neural_network(self):
-        """Animate the neural network visualization"""
+        """Animate neural network nodes and connections with a neon glow effect"""
         if not hasattr(self, 'nodes'):
             return
-            
-        # Update node activations
         for node in self.nodes:
             node['activation'] = min(1.0, max(0.2, node['activation'] + random.uniform(-0.1, 0.1)))
             color = self._adjust_color_brightness('#00bfff', node['activation'])
             self.neural_canvas.itemconfig(node['id'], fill=color, outline=color)
-        
-        # Update connection activities
         for conn in self.connections:
             conn['activity'] = min(1.0, max(0.1, conn['activity'] + random.uniform(-0.1, 0.1)))
             color = self._adjust_color_brightness('#00bfff', conn['activity'])
             self.neural_canvas.itemconfig(conn['id'], fill=color)
-        
         self.root.after(100, self._animate_neural_network)
 
     def _create_env_display(self):
-        """Create an environment analysis display"""
+        """Create an environment analysis display with neon bars"""
         self.env_metrics = {
             'processing_load': 0.0,
             'response_time': 0.0,
             'creativity_index': 0.0
         }
-        
         y_pos = 5
         self.env_indicators = {}
-        
         for metric in self.env_metrics:
-            # Create label
             label = ttk.Label(
                 self.env_frame,
                 text=metric.replace('_', ' ').title(),
@@ -1022,8 +823,6 @@ class ChatUI:
                 font=('Rajdhani', 9)
             )
             label.pack(anchor='w', padx=5)
-            
-            # Create indicator bar
             bar = self.env_canvas.create_rectangle(
                 5, y_pos,
                 105, y_pos + 4,
@@ -1032,37 +831,25 @@ class ChatUI:
             )
             self.env_indicators[metric] = bar
             y_pos += 10
-        
         self._update_env_metrics()
 
     def _update_env_metrics(self):
-        """Update environment analysis metrics"""
-        # Simulate metric changes
+        """Update environment analysis metrics with smooth transitions"""
         for metric in self.env_metrics:
             target = random.uniform(0.3, 0.9)
             current = self.env_metrics[metric]
             self.env_metrics[metric] += (target - current) * 0.1
-            
-            # Update indicator bar
             bar = self.env_indicators[metric]
             width = self.env_metrics[metric] * 100
-            self.env_canvas.coords(
-                bar,
-                5, self.env_canvas.coords(bar)[1],
-                5 + width, self.env_canvas.coords(bar)[3]
-            )
-            
-            # Update color based on value
+            self.env_canvas.coords(bar, 5, self.env_canvas.coords(bar)[1], 5 + width, self.env_canvas.coords(bar)[3])
             color = self._adjust_color_brightness('#00bfff', 0.5 + self.env_metrics[metric] * 0.5)
             self.env_canvas.itemconfig(bar, fill=color)
-        
         self.root.after(200, self._update_env_metrics)
 
     def _create_hex_grid(self):
-        """Create animated hexagonal grid background"""
+        """Create an animated hexagonal grid background for a futuristic feel"""
         self.hex_cells = []
-        size = 20  # Size of hexagons
-        
+        size = 20
         for row in range(0, self.chat_frame.winfo_height(), size * 2):
             for col in range(0, 100, size * 2):
                 points = self._calculate_hex_points(col, row, size)
@@ -1077,33 +864,27 @@ class ChatUI:
                     'id': hex_cell,
                     'pulse': random.random() * math.pi
                 })
-        
         self._animate_hex_grid()
 
     def _calculate_hex_points(self, x, y, size):
-        """Calculate hexagon points"""
         points = []
         for i in range(6):
             angle = i * math.pi / 3
-            points.extend([
-                x + size * math.cos(angle),
-                y + size * math.sin(angle)
-            ])
+            points.extend([x + size * math.cos(angle), y + size * math.sin(angle)])
         return points
 
     def _animate_hex_grid(self):
-        """Animate hexagonal grid with pulsing effect"""
+        """Animate hexagonal grid lines with a pulsing neon glow"""
         t = time.time()
         for cell in self.hex_cells:
             cell['pulse'] += 0.05
             opacity = abs(math.sin(cell['pulse'])) * 0.5 + 0.2
             color = self._adjust_color_brightness('#00bfff', opacity)
             self.hex_canvas.itemconfig(cell['id'], outline=color)
-        
         self.root.after(50, self._animate_hex_grid)
 
     def _create_data_stream(self):
-        """Create falling data stream effect"""
+        """Create falling data stream effect to simulate high-tech information flow"""
         self.data_particles = []
         for _ in range(20):
             particle = {
@@ -1114,23 +895,18 @@ class ChatUI:
                 'opacity': random.random()
             }
             self.data_particles.append(particle)
-        
         self._animate_data_stream()
 
     def _animate_data_stream(self):
-        """Animate falling data stream"""
+        """Animate falling data stream particles"""
         self.stream_canvas.delete('stream')
         height = self.chat_frame.winfo_height()
-        
         for particle in self.data_particles:
-            # Update position
             particle['y'] += particle['speed']
             if particle['y'] > height:
                 particle['y'] = -particle['length']
                 particle['x'] = random.randint(5, 25)
                 particle['opacity'] = random.random()
-            
-            # Draw particle
             color = self._adjust_color_brightness('#00bfff', particle['opacity'])
             self.stream_canvas.create_line(
                 particle['x'], particle['y'],
@@ -1139,16 +915,14 @@ class ChatUI:
                 width=1,
                 tags='stream'
             )
-        
         self.root.after(50, self._animate_data_stream)
 
     def _create_frequency_analyzer(self):
-        """Create frequency analyzer visualization"""
+        """Create a frequency analyzer visualization with smooth, dynamic bars"""
         self.freq_bars = []
         bar_count = 30
         bar_width = 3
         spacing = 2
-        
         for i in range(bar_count):
             x = i * (bar_width + spacing) + 5
             bar = self.freq_canvas.create_line(
@@ -1161,29 +935,17 @@ class ChatUI:
                 'value': random.random(),
                 'target': random.random()
             })
-        
         self._animate_frequency_analyzer()
 
     def _animate_frequency_analyzer(self):
-        """Animate frequency analyzer bars"""
+        """Animate frequency analyzer bars with neon gradients"""
         for bar in self.freq_bars:
-            # Smoothly transition to target
             bar['value'] += (bar['target'] - bar['value']) * 0.2
             if abs(bar['target'] - bar['value']) < 0.01:
                 bar['target'] = random.random()
-            
-            # Update bar height
             height = bar['value'] * 35
-            self.freq_canvas.coords(
-                bar['id'],
-                self.freq_canvas.coords(bar['id'])[0],
-                40,
-                self.freq_canvas.coords(bar['id'])[0],
-                40 - height
-            )
-            
-            # Update color based on height
+            coords = self.freq_canvas.coords(bar['id'])
+            self.freq_canvas.coords(bar['id'], coords[0], 40, coords[0], 40 - height)
             color = self._adjust_color_brightness('#00bfff', 0.5 + bar['value'] * 0.5)
             self.freq_canvas.itemconfig(bar['id'], fill=color)
-        
         self.root.after(50, self._animate_frequency_analyzer)

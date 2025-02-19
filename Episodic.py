@@ -58,8 +58,21 @@ def initialize_cache():
         torch.save({"embeddings": [], "last_modified": 0}, EMBEDDINGS_CACHE)
     if not os.path.exists(EPISODES_FILE):
         with open(EPISODES_FILE, 'w', encoding='utf-8') as f:
-            pass  # Create empty file if it doesn't exist
-
+            pass
+    
+    # Direct cache population without dummy query
+    try:
+        if os.path.getsize(EPISODES_FILE) > 0:
+            episodes = [Episode.from_json(line) for line in open(EPISODES_FILE) if line.strip()]
+            episode_texts = [
+                f"{ep.memory_timestamp}|{ep.context_tags}|{ep.conversation_summary}|"
+                f"{ep.what_worked}|{ep.what_to_avoid}|{ep.what_you_learned}"
+                for ep in episodes
+            ]
+            embeddings = batch_embed_texts(episode_texts)
+            save_embeddings_cache(embeddings)
+    except Exception as e:
+        logging.error(f"Cache initialization failed: {e}")
 
 def load_cached_embeddings():
     """
@@ -330,7 +343,6 @@ def recall_episodic(query: str, top_k: int = 1) -> list:
         return []
 
     try:
-        initialize_cache()
 
         # Load and preprocess episodes
         with open(EPISODES_FILE, 'r', encoding='utf-8') as file:

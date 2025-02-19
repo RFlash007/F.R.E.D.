@@ -15,6 +15,9 @@ cache
 *.tmp
 *.swp
 *.swo
+*.csv
+*.iml
+*.xml
 
 # Backup files
 *.bak

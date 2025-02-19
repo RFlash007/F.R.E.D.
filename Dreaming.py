@@ -45,7 +45,17 @@ def initialize_cache():
         torch.save({"embeddings": [], "last_modified": 0}, EMBEDDINGS_CACHE)
     if not os.path.exists(FACTS_FILE):
         with open(FACTS_FILE, 'w', encoding='utf-8') as f:
-            pass  # Create empty file if it doesn't exist
+            pass
+    
+    # Direct cache population
+    try:
+        if os.path.getsize(FACTS_FILE) > 0:
+            facts = [Fact.from_json(line) for line in open(FACTS_FILE) if line.strip()]
+            fact_texts = [f"[{f.category}] {f.content}" for f in facts]
+            embeddings = batch_embed_texts(fact_texts)
+            save_embeddings_cache(embeddings)
+    except Exception as e:
+        logging.error(f"Cache initialization failed: {e}")
 
 def load_cached_embeddings():
     """
@@ -136,7 +146,7 @@ Generate new conversation ***RETURN ONLY THE CONVERSATION NO EXTRA TEXT***:"""
             model="huihui_ai/qwen2.5-abliterate:14b", 
             messages=[{"role": "user", "content": prompt}],
             stream=False,
-            options={"temperature": 1.5}
+            options={"temperature": 1.2}
         )
         result = response['message']['content']
         logging.debug(f"Generated synthetic conversation: {result[:100]}...")
@@ -298,7 +308,7 @@ def remove_duplicate_assumptions():
         return f"Error: {str(e)}"
 
 
-def consolidate_assumptions(similarity_threshold: float = 0.95) -> str:
+def consolidate_assumptions(similarity_threshold: float = 0.80) -> str:
     """
     Consolidate similar semantic facts based on a similarity threshold.
     1. Remove exact duplicates first.
@@ -378,4 +388,4 @@ def consolidate_assumptions(similarity_threshold: float = 0.95) -> str:
     
 
 if __name__ == "__main__":
-    print(recall_assumptions("coffee"))
+    update_assumptions()
