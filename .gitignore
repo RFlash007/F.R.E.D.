@@ -50,7 +50,7 @@ coverage/
 *.cover
 *.coverage
 *.coverage.*
-
+Notes/
 # Distribution files
 dist/
 build/
