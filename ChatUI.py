@@ -49,66 +49,210 @@ class ChatUI:
         # Use a modern theme as a base; clam works well for custom colors
         style.theme_use('clam')
         
-        # Main frames styling
-        style.configure('Neural.TFrame', background='#0a1520')
-        style.configure('Sidebar.TFrame', background='#0d1a2a')
-        style.configure('TSeparator', background='#00bfff')
+        # Enhanced color palette - deep blues with accent glow
+        self.colors = {
+            'bg_dark': '#0a1520',
+            'bg_medium': '#0d1a2a', 
+            'bg_light': '#132638',
+            'accent': '#00bfff',
+            'accent_bright': '#00dfff',
+            'accent_dim': '#007dc5',
+            'highlight': '#ff7b00',  # New orange highlight for alerts
+            'success': '#00c853',    # Success green
+            'warning': '#ffab00'     # Warning amber
+        }
         
-        # Action buttons styling with futuristic look
+        # Main frames styling with darker, more premium look
+        style.configure('Neural.TFrame', background=self.colors['bg_dark'])
+        style.configure('Sidebar.TFrame', background=self.colors['bg_medium'])
+        style.configure('TSeparator', background=self.colors['accent'])
+        
+        # Action buttons styling with enhanced holographic look
         style.configure('Action.TButton',
                         font=('Rajdhani', 11, 'bold'),
                         padding=8,
-                        background='#0d1a2a',
-                        foreground='#00bfff')
+                        background=self.colors['bg_medium'],
+                        foreground=self.colors['accent'])
         style.map('Action.TButton',
-                  background=[('active', '#102030')],
-                  foreground=[('active', '#00dfff')])
+                  background=[('active', self.colors['bg_light'])],
+                  foreground=[('active', self.colors['accent_bright'])])
         
-        # Entry field styling with neon effects
+        # Holographic buttons alternative style
+        style.configure('Hologram.TButton',
+                        font=('Rajdhani', 11, 'bold'),
+                        padding=8,
+                        background=self.colors['bg_medium'],
+                        foreground=self.colors['accent_bright'])
+        style.map('Hologram.TButton',
+                  background=[('active', self.colors['bg_medium'])],
+                  foreground=[('active', '#ffffff')])
+        
+        # Entry field styling with enhanced neon effects
         style.configure('Neural.TEntry',
-                        fieldbackground='#0d1a2a',
-                        foreground='#00bfff',
-                        insertcolor='#00dfff',
+                        fieldbackground=self.colors['bg_medium'],
+                        foreground=self.colors['accent'],
+                        insertcolor=self.colors['accent_bright'],
                         borderwidth=0)
         
-        # Custom label style for headers and status
+        # Custom label styles for different UI elements
         style.configure('Neural.TLabel',
-                        background='#0a1520',
-                        foreground='#00bfff',
+                        background=self.colors['bg_dark'],
+                        foreground=self.colors['accent'],
                         font=('Rajdhani', 11))
+        
+        style.configure('Title.TLabel',
+                        background=self.colors['bg_medium'],
+                        foreground=self.colors['accent_bright'],
+                        font=('Rajdhani', 24, 'bold'))
+        
+        style.configure('Status.TLabel',
+                        background=self.colors['bg_dark'],
+                        foreground=self.colors['accent'],
+                        font=('Rajdhani', 10))
+        
+        style.configure('Metric.TLabel',
+                        background=self.colors['bg_medium'],
+                        foreground=self.colors['accent'],
+                        font=('Rajdhani', 9))
         
     def _create_menu(self):
         menubar = tk.Menu(self.root)
         self.root.config(menu=menubar)
         
-        file_menu = tk.Menu(menubar, tearoff=0, bg='#1a2433', fg='#00bfff',
-                           activebackground='#2a3443', activeforeground='#00dfff')
+        # Update colors for menus
+        file_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
+                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Clear Chat", command=self._clear_chat)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.root.quit)
         
-        edit_menu = tk.Menu(menubar, tearoff=0, bg='#1a2433', fg='#00bfff',
-                           activebackground='#2a3443', activeforeground='#00dfff')
+        edit_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
+                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
         menubar.add_cascade(label="Edit", menu=edit_menu)
         edit_menu.add_command(label="Copy", command=lambda: self.chat_display.event_generate("<<Copy>>"))
         edit_menu.add_command(label="Paste", command=lambda: self.input_field.event_generate("<<Paste>>"))
+        
+        # Add a new help menu with F.R.E.D. commands
+        help_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
+                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About F.R.E.D.", command=self._show_about)
+        help_menu.add_command(label="Commands", command=self._show_commands)
     
     def _create_header(self):
-        """Create header with minimal clean design and animated time display"""
+        """Create header with advanced HUD-style elements and dynamic status indicators"""
         self.header_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
         
-        # Time display with pulsing separator
-        self.time_label = ttk.Label(
-            self.header_frame,
-            text="",
-            foreground='#00bfff',
-            background='#0a1520',
-            font=('Rajdhani', 12, 'bold')
+        # Left side: F.R.E.D. status indicator with pulse effect
+        self.status_indicator_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
+        self.status_indicator_frame.pack(side='left', fill='y')
+        
+        self.status_canvas = tk.Canvas(
+            self.status_indicator_frame,
+            width=30,
+            height=30,
+            bg=self.colors['bg_dark'],
+            highlightthickness=0
         )
-        self.time_label.pack(side='right', padx=10)
+        self.status_canvas.pack(side='left', padx=10)
+        
+        # Create status circle with pulsing effect
+        self.status_circle = self.status_canvas.create_oval(
+            5, 5, 25, 25,
+            fill=self.colors['accent'],
+            outline=self.colors['accent_bright'],
+            width=2
+        )
+        
+        # F.R.E.D. Current Status
+        self.status_text = ttk.Label(
+            self.status_indicator_frame,
+            text="F.R.E.D. STATUS: ONLINE",
+            style='Neural.TLabel',
+            font=('Rajdhani', 10, 'bold')
+        )
+        self.status_text.pack(side='left', padx=5)
+        
+        # Center: System metrics display (CPU, Memory)
+        self.metrics_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
+        self.metrics_frame.pack(side='left', fill='y', padx=20)
+        
+        # Create CPU and memory indicators
+        self.cpu_frame = ttk.Frame(self.metrics_frame, style='Neural.TFrame')
+        self.cpu_frame.pack(side='left', padx=10)
+        
+        self.cpu_label = ttk.Label(
+            self.cpu_frame,
+            text="CPU 0%",
+            style='Metric.TLabel'
+        )
+        self.cpu_label.pack(anchor='w')
+        
+        self.cpu_canvas = tk.Canvas(
+            self.cpu_frame,
+            width=100,
+            height=15,
+            bg=self.colors['bg_dark'],
+            highlightthickness=0
+        )
+        self.cpu_canvas.pack()
+        self.cpu_bar = self.cpu_canvas.create_rectangle(
+            0, 0, 10, 15,
+            fill=self.colors['accent'],
+            width=0
+        )
+        
+        self.memory_frame = ttk.Frame(self.metrics_frame, style='Neural.TFrame')
+        self.memory_frame.pack(side='left', padx=10)
+        
+        self.memory_label = ttk.Label(
+            self.memory_frame,
+            text="MEM 0%",
+            style='Metric.TLabel'
+        )
+        self.memory_label.pack(anchor='w')
+        
+        self.memory_canvas = tk.Canvas(
+            self.memory_frame,
+            width=100,
+            height=15,
+            bg=self.colors['bg_dark'],
+            highlightthickness=0
+        )
+        self.memory_canvas.pack()
+        self.memory_bar = self.memory_canvas.create_rectangle(
+            0, 0, 10, 15,
+            fill=self.colors['accent'],
+            width=0
+        )
+        
+        # Right side: Time display with digital clock effect
+        self.time_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
+        self.time_frame.pack(side='right', fill='y')
+        
+        self.date_label = ttk.Label(
+            self.time_frame,
+            text="",
+            foreground=self.colors['accent_dim'],
+            background=self.colors['bg_dark'],
+            font=('Rajdhani', 9)
+        )
+        self.date_label.pack(side='top', anchor='e', padx=10)
+        
+        self.time_label = ttk.Label(
+            self.time_frame,
+            text="",
+            foreground=self.colors['accent_bright'],
+            background=self.colors['bg_dark'],
+            font=('Rajdhani', 14, 'bold')
+        )
+        self.time_label.pack(side='bottom', anchor='e', padx=10)
+        
+        # Start animations and updates
         self._update_time()
-    
+        self._update_metrics()
+
     def _create_widgets(self):
         # Create main container
         self.container = ttk.Frame(self.root, style='Neural.TFrame')
@@ -411,23 +555,145 @@ class ChatUI:
         self.root.after(20, self._animate_enhanced_reactor)
 
     def create_action_buttons(self):
+        """Create holographic action buttons with enhanced visual effects"""
+        # Add a system status display above the buttons
+        self.system_status_frame = ttk.Frame(self.actions_frame, style='Sidebar.TFrame')
+        self.system_status_frame.pack(fill='x', padx=10, pady=10)
+        
+        # System status indicator
+        status_label = ttk.Label(
+            self.system_status_frame,
+            text="SYSTEM STATUS",
+            style='Neural.TLabel',
+            font=('Rajdhani', 9)
+        )
+        status_label.pack(anchor='w')
+        
+        # Create circular status indicators
+        self.systems_canvas = tk.Canvas(
+            self.system_status_frame,
+            width=200,
+            height=30,
+            bg=self.colors['bg_medium'],
+            highlightthickness=0
+        )
+        self.systems_canvas.pack(fill='x', pady=5)
+        
+        # Create status indicators for different systems
+        self.system_indicators = {}
+        systems = ['CORE', 'MEMORY', 'NETWORK', 'SENSORS']
+        
+        for i, system in enumerate(systems):
+            x_pos = 20 + i * 50
+            # Background circle
+            self.systems_canvas.create_oval(
+                x_pos - 8, 15 - 8,
+                x_pos + 8, 15 + 8,
+                fill=self.colors['bg_dark'],
+                outline=self.colors['accent_dim'],
+                width=1
+            )
+            # Status indicator
+            indicator = self.systems_canvas.create_oval(
+                x_pos - 5, 15 - 5,
+                x_pos + 5, 15 + 5,
+                fill=self.colors['success'],
+                outline=''
+            )
+            # Label
+            self.systems_canvas.create_text(
+                x_pos, 30,
+                text=system,
+                fill=self.colors['accent_dim'],
+                font=('Rajdhani', 7)
+            )
+            self.system_indicators[system] = indicator
+        
+        # Simulate occasional status changes for dynamic effect
+        self._animate_system_indicators()
+        
+        # Action buttons with holographic design
         actions = [
             ("🔍 SCAN", lambda: self._on_send(None, "Scan systems"), "Analyze system status"),
-            ("🔄 RESET", self._clear_chat, "Clear current session")
+            ("💡 ASSIST", lambda: self._on_send(None, "What can you help me with?"), "Get assistance"),
+            ("🔄 RESET", self._clear_chat, "Clear current session"),
+            ("⚙️ SETTINGS", self._show_settings, "Configure F.R.E.D. settings")
         ]
         
         for text, command, tooltip in actions:
             btn_frame = ttk.Frame(self.actions_frame, style='Sidebar.TFrame')
-            btn_frame.pack(fill='x', padx=10, pady=2)
+            btn_frame.pack(fill='x', padx=10, pady=3)
             
-            btn = ttk.Button(
+            # Create a canvas for the holographic button effect
+            btn_canvas = tk.Canvas(
                 btn_frame,
-                text=text,
-                command=command,
-                style='Action.TButton'
+                height=40,
+                bg=self.colors['bg_medium'],
+                highlightthickness=0
             )
-            btn.pack(fill='x')
-            self._create_tooltip(btn, tooltip)
+            btn_canvas.pack(fill='x')
+            
+            # Create button directly on canvas
+            btn_rect = btn_canvas.create_rectangle(
+                0, 0, 200, 40,
+                fill=self.colors['bg_medium'],
+                outline=self.colors['accent'],
+                width=1,
+                tags=f"button_{text}"
+            )
+            
+            # Add decoration lines for tech feel
+            btn_canvas.create_line(
+                0, 0, 10, 0,
+                fill=self.colors['accent_bright'],
+                width=2,
+                tags=f"button_{text}"
+            )
+            btn_canvas.create_line(
+                0, 0, 0, 10,
+                fill=self.colors['accent_bright'],
+                width=2,
+                tags=f"button_{text}"
+            )
+            btn_canvas.create_line(
+                200, 40, 190, 40,
+                fill=self.colors['accent_bright'],
+                width=2,
+                tags=f"button_{text}"
+            )
+            btn_canvas.create_line(
+                200, 40, 200, 30,
+                fill=self.colors['accent_bright'],
+                width=2,
+                tags=f"button_{text}"
+            )
+            
+            # Add text with glow effect
+            glow = btn_canvas.create_text(
+                100, 20,
+                text=text,
+                fill=self.colors['accent_bright'],
+                font=('Rajdhani', 11, 'bold'),
+                tags=f"button_{text}"
+            )
+            
+            # Add hover effects
+            def on_enter(e, canvas=btn_canvas, tags=f"button_{text}"):
+                canvas.itemconfig(tags, fill=self.colors['bg_light'])
+            
+            def on_leave(e, canvas=btn_canvas, tags=f"button_{text}", rect=btn_rect):
+                canvas.itemconfig(tags, fill=self.colors['bg_medium'])
+                canvas.itemconfig(rect, fill=self.colors['bg_medium'])
+            
+            def on_click(e, cmd=command, canvas=btn_canvas, tags=f"button_{text}"):
+                canvas.itemconfig(tags, fill=self.colors['bg_dark'])
+                self.root.after(100, cmd)
+            
+            btn_canvas.tag_bind(f"button_{text}", "<Enter>", on_enter)
+            btn_canvas.tag_bind(f"button_{text}", "<Leave>", on_leave)
+            btn_canvas.tag_bind(f"button_{text}", "<Button-1>", on_click)
+            
+            self._create_tooltip(btn_canvas, tooltip)
 
     def _create_tooltip(self, widget, text):
         """Create a floating tooltip for widgets"""
@@ -466,31 +732,65 @@ class ChatUI:
         self.send_button.configure(bg='#0d1a2a', fg='#00bfff')
 
     def _update_metrics(self):
-        """Update system metrics with smooth animations (if metrics widgets exist)"""
-        import psutil
-        cpu = psutil.cpu_percent()
-        memory = psutil.virtual_memory().percent
+        """Update system metrics with smooth animations"""
+        try:
+            import psutil
+            cpu = psutil.cpu_percent()
+            memory = psutil.virtual_memory().percent
+            
+            if hasattr(self, 'cpu_bar') and hasattr(self, 'memory_bar'):
+                # Smoothly animate CPU bar
+                current_cpu_width = self.cpu_canvas.coords(self.cpu_bar)[2] 
+                target_cpu_width = (cpu / 100) * 100
+                delta_cpu = (target_cpu_width - current_cpu_width) * 0.2
+                self.cpu_canvas.coords(self.cpu_bar, 0, 0, current_cpu_width + delta_cpu, 15)
+                
+                # Change CPU bar color based on usage
+                if cpu > 80:
+                    cpu_color = self.colors['highlight']
+                elif cpu > 50:
+                    cpu_color = self.colors['warning']
+                else:
+                    cpu_color = self.colors['accent']
+                self.cpu_canvas.itemconfig(self.cpu_bar, fill=cpu_color)
+                
+                # Smoothly animate memory bar
+                current_mem_width = self.memory_canvas.coords(self.memory_bar)[2]
+                target_mem_width = (memory / 100) * 100
+                delta_mem = (target_mem_width - current_mem_width) * 0.2
+                self.memory_canvas.coords(self.memory_bar, 0, 0, current_mem_width + delta_mem, 15)
+                
+                # Change memory bar color based on usage
+                if memory > 80:
+                    mem_color = self.colors['highlight']
+                elif memory > 50:
+                    mem_color = self.colors['warning']
+                else:
+                    mem_color = self.colors['accent']
+                self.memory_canvas.itemconfig(self.memory_bar, fill=mem_color)
+                
+                # Update labels
+                self.cpu_label.config(text=f"CPU {cpu:.0f}%")
+                self.memory_label.config(text=f"MEM {memory:.0f}%")
+        except (ImportError, Exception) as e:
+            # Fallback with simulated values if psutil isn't available
+            cpu = 25 + 15 * math.sin(time.time() / 5)
+            memory = 40 + 10 * math.sin(time.time() / 7)
+            
+            if hasattr(self, 'cpu_bar') and hasattr(self, 'memory_bar'):
+                self.cpu_canvas.coords(self.cpu_bar, 0, 0, cpu, 15)
+                self.memory_canvas.coords(self.memory_bar, 0, 0, memory, 15)
+                self.cpu_label.config(text=f"CPU {cpu:.0f}%")
+                self.memory_label.config(text=f"MEM {memory:.0f}%")
         
-        current_cpu_width = self.cpu_canvas.coords(self.cpu_bar)[2]
-        target_cpu_width = (cpu / 100) * 100
-        delta_cpu = (target_cpu_width - current_cpu_width) * 0.2
-        
-        self.cpu_canvas.coords(self.cpu_bar, 0, 0, current_cpu_width + delta_cpu, 15)
-        current_mem_width = self.memory_canvas.coords(self.memory_bar)[2]
-        target_mem_width = (memory / 100) * 100
-        delta_mem = (target_mem_width - current_mem_width) * 0.2
-        
-        self.memory_canvas.coords(self.memory_bar, 0, 0, current_mem_width + delta_mem, 15)
-        self.cpu_label.config(text=f"CPU {cpu:.0f}%")
-        self.memory_label.config(text=f"MEM {memory:.0f}%")
-        self._pulse_status_circle()
-        self.root.after(100, self._update_metrics)
+        self.root.after(1000, self._update_metrics)
     
     def _pulse_status_circle(self):
         t = time.time() * 2
         pulse = abs(math.sin(t)) * 0.3 + 0.7
-        color = self._adjust_color_brightness('#00bfff', pulse)
-        self.status_canvas.itemconfig(self.status_circle, fill=color, outline=color)
+        color = self._adjust_color_brightness(self.colors['accent'], pulse)
+        if hasattr(self, 'status_circle'):
+            self.status_canvas.itemconfig(self.status_circle, fill=color)
 
     def _adjust_color_brightness(self, color, factor):
         # Convert hex to RGB and adjust brightness
@@ -507,8 +807,21 @@ class ChatUI:
         self.sidebar.pack(side='left', fill='y')
         self.logo_frame.pack(fill='x', pady=(10, 5))
         self.logo_canvas.pack(expand=True)
+        
+        # Use our updated Title style for the sidebar title
+        self.sidebar_title.configure(style='Title.TLabel')
         self.sidebar_title.pack(fill='x', pady=(0, 10), padx=20)
-        ttk.Separator(self.sidebar, orient='horizontal').pack(fill='x', padx=10, pady=5)
+        
+        # Create a separator with enhanced pulsing glow effect
+        self.separator_canvas = tk.Canvas(
+            self.sidebar, 
+            height=2, 
+            bg=self.colors['bg_medium'],
+            highlightthickness=0
+        )
+        self.separator_canvas.pack(fill='x', padx=10, pady=5)
+        self._animate_separator()
+        
         self.actions_frame.pack(fill='x', pady=10, side='bottom')
         self.main_frame.pack(side='left', expand=True, fill='both')
         self.header_frame.pack(fill='x', pady=(0, 10))
@@ -518,7 +831,7 @@ class ChatUI:
         # Tech overlay pattern
         self.overlay_canvas = tk.Canvas(
             self.chat_frame,
-            bg='#0d1a2a',
+            bg=self.colors['bg_medium'],
             highlightthickness=0,
             width=self.chat_frame.winfo_width(),
             height=20
@@ -530,47 +843,151 @@ class ChatUI:
         self.stream_canvas.place(relx=1, rely=0, anchor='ne', relheight=1)
         self.hex_canvas.place(relx=1, rely=0, anchor='ne', relwidth=0.2, relheight=1)
         
+        # Enhanced input container with holographic design
         self.input_container.pack(fill='x', padx=20, pady=10)
+        
+        # Create radial background for input field
+        self.input_radial_frame = tk.Frame(
+            self.input_container,
+            bg=self.colors['bg_medium'],
+            highlightthickness=0
+        )
+        self.input_radial_frame.pack(fill='x', expand=True, pady=5)
+        
+        # Circular 'glow' behind input
+        self.input_radial_canvas = tk.Canvas(
+            self.input_radial_frame,
+            bg=self.colors['bg_medium'],
+            highlightthickness=0,
+            height=50
+        )
+        self.input_radial_canvas.pack(fill='x', pady=5)
+        self._create_input_radial()
+        
         self.input_frame.pack(fill='x', expand=True)
-        self.input_border = tk.Canvas(self.input_frame, height=2, bg='#0a1520', highlightthickness=0)
+        self.input_border = tk.Canvas(
+            self.input_frame, 
+            height=2, 
+            bg=self.colors['bg_dark'], 
+            highlightthickness=0
+        )
         self.input_border.pack(fill='x', side='bottom')
+        
+        # Include voice indicator next to input field for JARVIS-like activation
+        self.voice_indicator.pack(side='left', padx=(0, 10))
         self.input_field.pack(side='left', expand=True, fill='x', padx=(0, 10))
+        
+        # Update send button to match holographic style
+        self.send_button.configure(
+            bg=self.colors['bg_medium'],
+            fg=self.colors['accent_bright'],
+            activebackground=self.colors['bg_light'],
+            activeforeground='#ffffff',
+            text="TRANSMIT"
+        )
         self.send_button.pack(side='right')
+        
         self.status_frame.pack(fill='x', pady=(10, 0))
         self.status_bar.pack(side='left')
         
-        self.input_field.bind("<FocusIn>", self._start_border_animation)
-        self.input_field.bind("<FocusOut>", self._stop_border_animation)
+        # Bind focus events for input field glow effect
+        self.input_field.bind("<FocusIn>", self._start_input_glow)
+        self.input_field.bind("<FocusOut>", self._stop_input_glow)
         self.input_field.focus_set()
+        
         self._start_animations()
-
-    def _start_animations(self):
-        """Start all UI animations"""
-        self._animate_border()
-        self._animate_enhanced_reactor()
-        self._animate_hex_grid()
-        self._animate_data_stream()
-
-    def _animate_border(self):
-        """Animate the input border with a flowing neon effect"""
-        if hasattr(self, '_border_animation_active') and self._border_animation_active:
-            width = self.input_border.winfo_width()
-            t = time.time() * 2
-            for i in range(3):
-                offset = i * width / 3
-                x = (t + offset) % width
-                opacity = abs(math.sin(x / width * math.pi))
-                color = self._adjust_color_brightness('#00bfff', opacity * 0.7 + 0.3)
-                self.input_border.create_line(x, 0, x + width/6, 0, fill=color, width=2, tags='flow')
-            self.input_border.delete('old')
-        self.root.after(50, self._animate_border)
     
-    def _start_border_animation(self, event):
-        self._border_animation_active = True
+    def _create_input_radial(self):
+        """Create a radial glow effect behind the input field"""
+        width = self.input_radial_canvas.winfo_width() or 400
+        height = self.input_radial_canvas.winfo_height()
+        center_x = width // 2
+        
+        # Create circular gradient
+        self.input_glow = []
+        for i in range(10, 0, -1):
+            radius = 25 - i
+            alpha = 0.08 - (i * 0.005)
+            color = self._adjust_color_brightness(self.colors['accent'], alpha)
+            glow = self.input_radial_canvas.create_oval(
+                center_x - radius, 25 - radius,
+                center_x + radius, 25 + radius,
+                fill=color,
+                outline='',
+                tags='glow'
+            )
+            self.input_glow.append((glow, radius))
+        
+        # Input field positioning line
+        self.input_radial_canvas.create_line(
+            0, 25, width, 25,
+            fill=self._adjust_color_brightness(self.colors['accent'], 0.2),
+            dash=(3, 5),
+            tags='glow'
+        )
+        
+        # Add some tech decorations
+        for x in range(0, width, 25):
+            if x != center_x:  # Skip the center point
+                size = 2
+                self.input_radial_canvas.create_rectangle(
+                    x - size, 25 - size,
+                    x + size, 25 + size,
+                    fill=self.colors['accent_dim'],
+                    outline='',
+                    tags='glow'
+                )
     
-    def _stop_border_animation(self, event):
-        self._border_animation_active = False
-        self.input_border.delete('all')
+    def _start_input_glow(self, event):
+        """Start the input glow animation when focused"""
+        self._input_glow_active = True
+        self._animate_input_glow()
+    
+    def _stop_input_glow(self, event):
+        """Stop the input glow animation when focus is lost"""
+        self._input_glow_active = False
+    
+    def _animate_input_glow(self):
+        """Animate the input glow with a pulsing effect"""
+        if not hasattr(self, '_input_glow_active') or not self._input_glow_active:
+            return
+        
+        t = time.time() * 2
+        pulse = abs(math.sin(t)) * 0.5 + 0.5
+        
+        if hasattr(self, 'input_glow'):
+            for glow, radius in self.input_glow:
+                new_radius = radius * (1 + pulse * 0.2)
+                color = self._adjust_color_brightness(
+                    self.colors['accent'], 
+                    0.05 + pulse * 0.08
+                )
+                self.input_radial_canvas.itemconfig(glow, fill=color)
+        
+        self.root.after(50, self._animate_input_glow)
+    
+    def _animate_separator(self):
+        """Animate the sidebar separator with flowing light"""
+        width = self.separator_canvas.winfo_width() or 250
+        self.separator_canvas.delete('flow')
+        
+        # Create flowing light effect
+        t = time.time() * 100
+        x = (t % width)
+        
+        # Draw gradient pulse along separator
+        for i in range(20):
+            pos = (x - i * 4) % width
+            alpha = max(0, 0.9 - (i * 0.05))
+            color = self._adjust_color_brightness(self.colors['accent'], alpha)
+            self.separator_canvas.create_line(
+                pos, 0, pos + 10, 0,
+                fill=color,
+                width=2,
+                tags='flow'
+            )
+        
+        self.root.after(50, self._animate_separator)
 
     def _on_send(self, event=None, preset_message=None):
         message = preset_message if preset_message else self.input_field.get().strip()
@@ -662,11 +1079,26 @@ class ChatUI:
         type_message(message)
     
     def _update_time(self):
-        """Update time display with a blinking separator for a dynamic feel"""
-        current_time = datetime.now().strftime("%H:%M:%S")
+        """Update time display with digital clock effect and date"""
+        current_time = datetime.now()
+        
+        # Format date
+        date_str = current_time.strftime("%A, %B %d, %Y")
+        self.date_label.config(text=date_str)
+        
+        # Format time with blinking separator for dynamic effect
+        time_str = current_time.strftime("%H:%M:%S")
         separator = ":" if time.time() % 1 < 0.5 else " "
-        formatted_time = current_time.replace(":", separator)
-        self.time_label.config(text=formatted_time, foreground='#00bfff')
+        formatted_time = time_str.replace(":", separator)
+        self.time_label.config(text=formatted_time)
+        
+        # Pulse the status circle
+        t = time.time() * 2
+        pulse = abs(math.sin(t)) * 0.3 + 0.7
+        color = self._adjust_color_brightness(self.colors['accent'], pulse)
+        if hasattr(self, 'status_circle'):
+            self.status_canvas.itemconfig(self.status_circle, fill=color)
+        
         self.root.after(500, self._update_time)
     
     def _start_msg_checker(self):
@@ -949,3 +1381,97 @@ class ChatUI:
             color = self._adjust_color_brightness('#00bfff', 0.5 + bar['value'] * 0.5)
             self.freq_canvas.itemconfig(bar['id'], fill=color)
         self.root.after(50, self._animate_frequency_analyzer)
+
+    def _show_about(self):
+        """Show information about F.R.E.D."""
+        about_text = (
+            "F.R.E.D. - Funny Rude Educated Droid\n\n"
+            "Version 1.0\n"
+            "© 2023 Neural Intelligence Division\n\n"
+            "F.R.E.D. is an advanced artificial intelligence assistant designed to help with a variety of tasks."
+        )
+        messagebox.showinfo("About F.R.E.D.", about_text)
+    
+    def _show_commands(self):
+        """Show available F.R.E.D. commands"""
+        commands_text = (
+            "Available Commands:\n\n"
+            "• 'scan systems' - Check system status\n"
+            "• 'quick learn [topic]' - Search for information\n"
+            "• 'news [topic]' - Get latest news\n"
+            "• 'create note [title]' - Create a new note\n"
+            "• 'deep research [topic]' - Perform in-depth research\n"
+            "• 'goodbye' - Exit conversation"
+        )
+        messagebox.showinfo("F.R.E.D. Commands", commands_text)
+
+    def _start_animations(self):
+        """Start all UI animations"""
+        self._animate_enhanced_reactor()
+        self._animate_hex_grid()
+        self._animate_data_stream()
+        self._animate_input_glow()
+        self._animate_separator()
+
+    def _animate_system_indicators(self):
+        """Animate system status indicators for a dynamic dashboard effect"""
+        if hasattr(self, 'system_indicators'):
+            # Randomly change one indicator occasionally
+            if random.random() < 0.05:  # 5% chance each cycle
+                system = random.choice(list(self.system_indicators.keys()))
+                status = random.choice([
+                    self.colors['success'],  # Online
+                    self.colors['warning'],  # Warning
+                    self.colors['highlight']  # Alert
+                ])
+                self.systems_canvas.itemconfig(self.system_indicators[system], fill=status)
+        
+        # Run this animation less frequently
+        self.root.after(1000, self._animate_system_indicators)
+
+    def _show_settings(self):
+        """Show settings dialog"""
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("F.R.E.D. Settings")
+        settings_window.geometry("400x300")
+        settings_window.configure(bg=self.colors['bg_medium'])
+        
+        # Center the window
+        settings_window.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - settings_window.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - settings_window.winfo_height()) // 2
+        settings_window.geometry(f"+{x}+{y}")
+        
+        # Simple settings content
+        title_label = ttk.Label(
+            settings_window,
+            text="F.R.E.D. CONFIGURATION",
+            style='Title.TLabel',
+            font=('Rajdhani', 16, 'bold')
+        )
+        title_label.pack(pady=20)
+        
+        # Settings options would go here
+        ttk.Label(
+            settings_window,
+            text="Settings functionality will be implemented in a future update.",
+            style='Neural.TLabel'
+        ).pack(pady=40)
+        
+        # Close button
+        close_btn = tk.Button(
+            settings_window,
+            text="CLOSE",
+            font=('Rajdhani', 11, 'bold'),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['accent_bright'],
+            activebackground=self.colors['bg_light'],
+            activeforeground='#ffffff',
+            relief='flat',
+            padx=15,
+            pady=5,
+            cursor='hand2',
+            bd=0
+        )
+        close_btn.pack(pady=20)
+        close_btn.bind("<Button-1>", lambda e: settings_window.destroy())
