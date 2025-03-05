@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import scrolledtext, ttk, messagebox, PhotoImage
+from tkinter import scrolledtext, ttk, messagebox, PhotoImage, Canvas, font, filedialog
 import threading
 from queue import Queue
 from datetime import datetime
@@ -8,16 +8,32 @@ import os
 import time
 import math
 import random
+import colorsys
+from PIL import Image, ImageTk, ImageDraw, ImageFilter, ImageOps
+import sys
+import platform
+from typing import Dict, List, Tuple, Any, Optional, Union
 
 class ChatUI:
     def __init__(self, chat_callback):
         self.root = tk.Tk()
         self.root.title("F.R.E.D. Neural Interface")
         self.root.geometry("1200x800")
-        self.root.configure(bg='#0a1520')
+        self.root.configure(bg='#0e0021')
         
-        # Set constant transparency
-        self.root.attributes('-alpha', 0.95)
+        # Load fonts or use fallbacks
+        self._load_fonts()
+        
+        # Enable transparency support with platform-specific handling
+        if platform.system() == "Windows":
+            # On Windows, we use a different method for transparency
+            self.root.attributes('-alpha', 0.92)
+        else:
+            # Other platforms may support different transparency methods
+            try:
+                self.root.attributes('-alpha', 0.92)
+            except:
+                pass
         
         # Set window icon
         try:
@@ -25,976 +41,1625 @@ class ChatUI:
         except:
             pass
         
-        # Initialize thought process visualization
-        self.thinking_particles = []
-        self.particle_canvas = None
+        # Core system components
+        self.arc_reactor = None
+        self.arc_reactor_active = False
+        self.thinking_indicator = None
+        self.holographic_display = None
+        self.conversation_panel = None
+        
+        # Minimal animation states
+        self.arc_pulse_active = False
+        self.ambient_glow_active = False
         
         # Message queue for thread-safe UI updates
         self.msg_queue = Queue()
         self.chat_callback = chat_callback
         self.conversation_history = []
         
+        # System information for display
+        self.system_info = self._get_system_info()
+        
         # Create custom styles and widgets
         self._create_styles()
         self._create_widgets()
         self._setup_layout()
         self._start_msg_checker()
+        self._initialize_arc_reactor()
         
-        # Keyboard shortcuts
+        # Enhanced keyboard shortcuts
         self.root.bind("<Control-c>", lambda e: self._clear_chat())
         self.root.bind("<Control-q>", lambda e: self.root.quit())
+        self.root.bind("<F11>", lambda e: self._toggle_fullscreen())
+        self.root.bind("<Escape>", lambda e: self._exit_fullscreen())
+
+    def _load_fonts(self):
+        """Load fonts and set up font dictionary"""
+        available_fonts = {}
+        
+        # List of preferred fonts for each category
+        heading_fonts = ['Orbitron', 'Rajdhani', 'Audiowide', 'Exo', 'Teko', 'Roboto Condensed', 'Arial', 'Helvetica']
+        mono_fonts = ['Inconsolata', 'Roboto Mono', 'Source Code Pro', 'Courier New', 'Consolas']
+        body_fonts = ['Roboto', 'Oxygen', 'Open Sans', 'Segoe UI', 'Arial', 'Helvetica']
+        
+        # Get the first available font for each category
+        available_fonts['heading'] = self._get_available_font(heading_fonts)
+        available_fonts['mono'] = self._get_available_font(mono_fonts)
+        available_fonts['body'] = self._get_available_font(body_fonts)
+        
+        # Add 'main' as an alias for 'body' font for backward compatibility
+        available_fonts['main'] = available_fonts['body']
+        
+        self.fonts = available_fonts
+    
+    def _get_available_font(self, font_list):
+        """Return the first available font from a list of preferences"""
+        try:
+            available_fonts = list(font.families())
+            
+            for font_name in font_list:
+                if font_name in available_fonts:
+                    return font_name
+                    
+            # Return system default if none of the preferred fonts are available
+            return font_list[-1]  # Last font in list is the ultimate fallback
+        except:
+            return "TkDefaultFont"
+    
+    def _get_system_info(self) -> Dict[str, str]:
+        """Gather system information for display in the UI"""
+        try:
+            info = {
+                "os": platform.system() + " " + platform.release(),
+                "processor": platform.processor(),
+                "hostname": platform.node(),
+                "python": sys.version.split()[0],
+                "memory": f"{round(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024.**3), 2)} GB" if hasattr(os, 'sysconf') else "Unknown",
+            }
+        except:
+            info = {
+                "os": platform.system(),
+                "processor": "Unknown",
+                "hostname": "Unknown",
+                "python": sys.version.split()[0],
+                "memory": "Unknown"
+            }
+        return info
+    
+    def _toggle_fullscreen(self, event=None):
+        """Toggle fullscreen mode"""
+        self.root.attributes("-fullscreen", not self.root.attributes("-fullscreen"))
+        
+    def _exit_fullscreen(self, event=None):
+        """Exit fullscreen mode"""
+        self.root.attributes("-fullscreen", False)
 
     def _create_styles(self):
-        style = ttk.Style()
-        # Use a modern theme as a base; clam works well for custom colors
-        style.theme_use('clam')
-        
-        # Enhanced color palette - deep blues with accent glow
+        """Set up chat UI colors and styles"""
+        # Create clean, modern color scheme with Stark-inspired accent
         self.colors = {
-            'bg_dark': '#0a1520',
-            'bg_medium': '#0d1a2a', 
-            'bg_light': '#132638',
-            'accent': '#00bfff',
-            'accent_bright': '#00dfff',
-            'accent_dim': '#007dc5',
-            'highlight': '#ff7b00',  # New orange highlight for alerts
-            'success': '#00c853',    # Success green
-            'warning': '#ffab00'     # Warning amber
+            'bg_dark': '#0d1117',  # Dark background
+            'bg_medium': '#161b22', # Medium background
+            'bg_light': '#21262d',  # Light background
+            'text_primary': '#f0f6fc', # Primary text
+            'text_secondary': '#8b949e', # Secondary text
+            'stark_blue': '#0ea5e9', # Stark-inspired blue accent
+            'accent': '#1f6feb', # Accent color 
+            'accent_dim': '#1a4b91', # Dimmer accent for backgrounds
+            'accent_bright': '#58a6ff', # Brighter accent for highlights
+            'hologram': '#38bdf8', # Holographic elements
+            'warning': '#d29922', # Warning color
+            'error': '#f85149'  # Error color
         }
         
-        # Main frames styling with darker, more premium look
-        style.configure('Neural.TFrame', background=self.colors['bg_dark'])
-        style.configure('Sidebar.TFrame', background=self.colors['bg_medium'])
-        style.configure('TSeparator', background=self.colors['accent'])
+        # Configure tag styles for the chat
+        self.tag_styles = {
+            'user': {
+                'font': (self.fonts['body'], 11),
+                'foreground': self.colors['text_primary'],
+                'background': self.colors['bg_light'],
+                'prefix': 'You: ',
+                'prefix_style': {'foreground': self.colors['accent_bright']}
+            },
+            'assistant': {
+                'font': (self.fonts['body'], 11),
+                'foreground': self.colors['text_primary'],
+                'background': None,
+                'prefix': 'F.R.E.D.: ',
+                'prefix_style': {'foreground': self.colors['stark_blue']}
+            }
+        }
+        style = ttk.Style()
+        # Use a modern theme as a base
+        style.theme_use('clam')
         
-        # Action buttons styling with enhanced holographic look
-        style.configure('Action.TButton',
-                        font=('Rajdhani', 11, 'bold'),
-                        padding=8,
-                        background=self.colors['bg_medium'],
-                        foreground=self.colors['accent'])
-        style.map('Action.TButton',
-                  background=[('active', self.colors['bg_light'])],
-                  foreground=[('active', self.colors['accent_bright'])])
+        # Translucent purple color scheme
+        self.colors = {
+            'bg_dark': '#0e0021',        # Deep purple background
+            'bg_medium': '#1a0438',      # Medium purple backdrop
+            'bg_light': '#2c0657',       # Lighter purple for highlights
+            'accent': '#9d6ad8',         # Primary accent (medium purple)
+            'accent_bright': '#c17bff',  # Bright highlights for focus
+            'accent_dim': '#4e2d82',     # Deeper purple for inactive elements
+            'stark_blue': '#8a2be2',     # Transformed to vivid purple (originally blue)
+            'stark_glow': '#b360fb',     # Arc reactor glow (purple)
+            'hologram': '#c8a2ff',       # Hologram lavender
+            'warning': '#ffac42',        # Warning amber
+            'success': '#42ffac',        # Success green
+            'error': '#ff4278',          # Error red
+            'glow': '#b888ff',           # Glow effect base
+            'text_primary': '#f5f0ff',   # Primary text color
+            'text_secondary': '#d6c2ff', # Secondary text color
+            'grid_line': '#2a1550',      # Grid pattern lines
+            'transparent': self.root.cget('bg'),  # Use root background color for "transparency"
+        }
         
-        # Holographic buttons alternative style
-        style.configure('Hologram.TButton',
-                        font=('Rajdhani', 11, 'bold'),
-                        padding=8,
-                        background=self.colors['bg_medium'],
-                        foreground=self.colors['accent_bright'])
-        style.map('Hologram.TButton',
-                  background=[('active', self.colors['bg_medium'])],
-                  foreground=[('active', '#ffffff')])
+        # Frame styling with translucent depth
+        style.configure('FRED.TFrame', 
+                      background=self.colors['bg_dark'])
         
-        # Entry field styling with enhanced neon effects
-        style.configure('Neural.TEntry',
-                        fieldbackground=self.colors['bg_medium'],
-                        foreground=self.colors['accent'],
-                        insertcolor=self.colors['accent_bright'],
-                        borderwidth=0)
+        style.configure('Panel.TFrame',
+                      background=self.colors['bg_medium'],
+                      relief='flat')
+                      
+        style.configure('Arc.TFrame',
+                      background=self.colors['bg_dark'],
+                      borderwidth=0,
+                      relief='flat')
         
-        # Custom label styles for different UI elements
-        style.configure('Neural.TLabel',
-                        background=self.colors['bg_dark'],
-                        foreground=self.colors['accent'],
-                        font=('Rajdhani', 11))
+        style.configure('TSeparator', 
+                      background=self.colors['accent'])
+        
+        # Button styling with holographic look
+        style.configure('FRED.TButton',
+                      font=(self.fonts['heading'], 11, 'bold'),
+                      padding=8,
+                      background=self.colors['bg_medium'],
+                      foreground=self.colors['accent_bright'],
+                      borderwidth=0,
+                      focusthickness=0,
+                      focuscolor=self.colors['accent'])
+                      
+        style.map('FRED.TButton',
+                background=[('active', self.colors['bg_light'])],
+                foreground=[('active', self.colors['stark_blue'])])
+        
+        # Command button styling
+        style.configure('Command.TButton',
+                      font=(self.fonts['heading'], 12, 'bold'),
+                      padding=10,
+                      background=self.colors['accent_dim'],
+                      foreground=self.colors['text_primary'],
+                      borderwidth=0,
+                      focusthickness=0)
+                      
+        style.map('Command.TButton',
+                background=[('active', self.colors['accent'])],
+                foreground=[('active', '#ffffff')])
+        
+        # Entry field with glow
+        style.configure('FRED.TEntry',
+                      font=(self.fonts['heading'], 12),
+                      fieldbackground=self.colors['bg_medium'],
+                      foreground=self.colors['accent_bright'],
+                      insertcolor=self.colors['stark_blue'],
+                      borderwidth=0,
+                      relief='flat')
+        
+        # Label styling
+        style.configure('FRED.TLabel',
+                      background=self.colors['bg_dark'],
+                      foreground=self.colors['accent'],
+                      font=(self.fonts['heading'], 11))
         
         style.configure('Title.TLabel',
-                        background=self.colors['bg_medium'],
-                        foreground=self.colors['accent_bright'],
-                        font=('Rajdhani', 24, 'bold'))
+                      background=self.colors['bg_medium'],
+                      foreground=self.colors['accent_bright'],
+                      font=(self.fonts['heading'], 22, 'bold'))
         
+        style.configure('Subtitle.TLabel',
+                      background=self.colors['bg_dark'],
+                      foreground=self.colors['stark_blue'],
+                      font=(self.fonts['heading'], 14, 'bold'))
+                      
         style.configure('Status.TLabel',
-                        background=self.colors['bg_dark'],
-                        foreground=self.colors['accent'],
-                        font=('Rajdhani', 10))
+                      background=self.colors['bg_dark'],
+                      foreground=self.colors['hologram'],
+                      font=(self.fonts['heading'], 10, 'bold'))
+                      
+        style.configure('Data.TLabel',
+                      background=self.colors['bg_medium'],
+                      foreground=self.colors['text_secondary'],
+                      font=(self.fonts['mono'], 10))
+                      
+        # Tech-inspired progressbar
+        style.configure("FRED.Horizontal.TProgressbar",
+                      troughcolor=self.colors['bg_dark'],
+                      background=self.colors['stark_blue'],
+                      thickness=4)
         
-        style.configure('Metric.TLabel',
-                        background=self.colors['bg_medium'],
-                        foreground=self.colors['accent'],
-                        font=('Rajdhani', 9))
-        
-    def _create_menu(self):
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        
-        # Update colors for menus
-        file_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
-                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Clear Chat", command=self._clear_chat)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.root.quit)
-        
-        edit_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
-                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
-        menubar.add_cascade(label="Edit", menu=edit_menu)
-        edit_menu.add_command(label="Copy", command=lambda: self.chat_display.event_generate("<<Copy>>"))
-        edit_menu.add_command(label="Paste", command=lambda: self.input_field.event_generate("<<Paste>>"))
-        
-        # Add a new help menu with F.R.E.D. commands
-        help_menu = tk.Menu(menubar, tearoff=0, bg=self.colors['bg_medium'], fg=self.colors['accent'],
-                            activebackground=self.colors['bg_light'], activeforeground=self.colors['accent_bright'])
-        menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About F.R.E.D.", command=self._show_about)
-        help_menu.add_command(label="Commands", command=self._show_commands)
-    
-    def _create_header(self):
-        """Create header with advanced HUD-style elements and dynamic status indicators"""
-        self.header_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
-        
-        # Left side: F.R.E.D. status indicator with pulse effect
-        self.status_indicator_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
-        self.status_indicator_frame.pack(side='left', fill='y')
-        
-        self.status_canvas = tk.Canvas(
-            self.status_indicator_frame,
-            width=30,
-            height=30,
-            bg=self.colors['bg_dark'],
-            highlightthickness=0
-        )
-        self.status_canvas.pack(side='left', padx=10)
-        
-        # Create status circle with pulsing effect
-        self.status_circle = self.status_canvas.create_oval(
-            5, 5, 25, 25,
-            fill=self.colors['accent'],
-            outline=self.colors['accent_bright'],
-            width=2
-        )
-        
-        # F.R.E.D. Current Status
-        self.status_text = ttk.Label(
-            self.status_indicator_frame,
-            text="F.R.E.D. STATUS: ONLINE",
-            style='Neural.TLabel',
-            font=('Rajdhani', 10, 'bold')
-        )
-        self.status_text.pack(side='left', padx=5)
-        
-        # Center: System metrics display (CPU, Memory)
-        self.metrics_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
-        self.metrics_frame.pack(side='left', fill='y', padx=20)
-        
-        # Create CPU and memory indicators
-        self.cpu_frame = ttk.Frame(self.metrics_frame, style='Neural.TFrame')
-        self.cpu_frame.pack(side='left', padx=10)
-        
-        self.cpu_label = ttk.Label(
-            self.cpu_frame,
-            text="CPU 0%",
-            style='Metric.TLabel'
-        )
-        self.cpu_label.pack(anchor='w')
-        
-        self.cpu_canvas = tk.Canvas(
-            self.cpu_frame,
-            width=100,
-            height=15,
-            bg=self.colors['bg_dark'],
-            highlightthickness=0
-        )
-        self.cpu_canvas.pack()
-        self.cpu_bar = self.cpu_canvas.create_rectangle(
-            0, 0, 10, 15,
-            fill=self.colors['accent'],
-            width=0
-        )
-        
-        self.memory_frame = ttk.Frame(self.metrics_frame, style='Neural.TFrame')
-        self.memory_frame.pack(side='left', padx=10)
-        
-        self.memory_label = ttk.Label(
-            self.memory_frame,
-            text="MEM 0%",
-            style='Metric.TLabel'
-        )
-        self.memory_label.pack(anchor='w')
-        
-        self.memory_canvas = tk.Canvas(
-            self.memory_frame,
-            width=100,
-            height=15,
-            bg=self.colors['bg_dark'],
-            highlightthickness=0
-        )
-        self.memory_canvas.pack()
-        self.memory_bar = self.memory_canvas.create_rectangle(
-            0, 0, 10, 15,
-            fill=self.colors['accent'],
-            width=0
-        )
-        
-        # Right side: Time display with digital clock effect
-        self.time_frame = ttk.Frame(self.header_frame, style='Neural.TFrame')
-        self.time_frame.pack(side='right', fill='y')
-        
-        self.date_label = ttk.Label(
-            self.time_frame,
-            text="",
-            foreground=self.colors['accent_dim'],
-            background=self.colors['bg_dark'],
-            font=('Rajdhani', 9)
-        )
-        self.date_label.pack(side='top', anchor='e', padx=10)
-        
-        self.time_label = ttk.Label(
-            self.time_frame,
-            text="",
-            foreground=self.colors['accent_bright'],
-            background=self.colors['bg_dark'],
-            font=('Rajdhani', 14, 'bold')
-        )
-        self.time_label.pack(side='bottom', anchor='e', padx=10)
-        
-        # Start animations and updates
-        self._update_time()
-        self._update_metrics()
-
     def _create_widgets(self):
-        # Create main container
-        self.container = ttk.Frame(self.root, style='Neural.TFrame')
+        """Create innovative F.R.E.D. interface elements"""
+        # Create main container with layered design
+        self.container = ttk.Frame(self.root, style='FRED.TFrame')
         
-        # Create sidebar with JARVIS-inspired design
-        self.sidebar = ttk.Frame(self.container, style='Sidebar.TFrame', width=250)
+        # Main interface frame
+        self.main_frame = ttk.Frame(self.container, padding="0", style='FRED.TFrame')
         
-        # Add F.R.E.D. logo/title with glowing effect
-        self.logo_frame = ttk.Frame(self.sidebar, style='Sidebar.TFrame')
-        self.logo_canvas = tk.Canvas(
-            self.logo_frame,
-            width=200,
-            height=200,
-            bg='#0d1a2a',
+        # Create the left sidebar for Arc Reactor
+        self.left_sidebar = ttk.Frame(self.main_frame, style='FRED.TFrame', width=200)
+        self.left_sidebar.pack(side='left', fill='y', padx=0, pady=0)
+        self.left_sidebar.pack_propagate(False)  # Maintain fixed width
+        
+        # Create arc reactor container
+        self.arc_reactor_frame = ttk.Frame(self.left_sidebar, style='Arc.TFrame')
+        self.arc_reactor_frame.pack(side='top', pady=(50, 0))
+        
+        # Create arc reactor canvas
+        self.arc_reactor_canvas = tk.Canvas(
+            self.arc_reactor_frame,
+            width=180,
+            height=180,
+            bg=self.colors['bg_dark'],
             highlightthickness=0
         )
-        # Enhanced reactor logo with additional glow and particle effects
-        self.create_reactor_logo()
+        self.arc_reactor_canvas.pack()
         
-        self.sidebar_title = ttk.Label(
-            self.sidebar,
+        # Create system identifier
+        self.system_id = ttk.Label(
+            self.left_sidebar,
             text="F.R.E.D.",
-            foreground='#00bfff',
-            background='#0d1a2a',
-            font=('Rajdhani', 24, 'bold')
+            style='Subtitle.TLabel',
+            anchor='center'
         )
+        self.system_id.pack(pady=(10, 5))
         
-        # Quick action buttons with icons
-        self.actions_frame = ttk.Frame(self.sidebar, style='Sidebar.TFrame')
-        self.create_action_buttons()
+        self.system_subtitle = ttk.Label(
+            self.left_sidebar,
+            text="Funny Rude\nEducated Droid",
+            foreground=self.colors['text_secondary'],
+            background=self.colors['bg_dark'],
+            font=(self.fonts['heading'], 8),
+            justify='center'
+        )
+        self.system_subtitle.pack()
         
-        # Main chat area
-        self.main_frame = ttk.Frame(self.container, padding="20", style='Neural.TFrame')
+        # Create status indicator
+        self.status_frame = ttk.Frame(self.left_sidebar, style='FRED.TFrame')
+        self.status_frame.pack(side='bottom', fill='x', pady=(0, 20))
         
-        self._create_menu()
-        self._create_header()
+        self.status_bar = ttk.Label(
+            self.status_frame,
+            text="SYSTEMS NOMINAL",
+            style='Status.TLabel',
+            anchor='center'
+        )
+        self.status_bar.pack(fill='x', padx=5, pady=5)
         
-        # Chat display with custom scrollbar and futuristic font
-        self.chat_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
+        # Create innovative radial menu below arc reactor
+        self.radial_menu_frame = ttk.Frame(self.left_sidebar, style='FRED.TFrame')
+        self.radial_menu_frame.pack(fill='x', expand=True, padx=10, pady=20)
+        
+        # Create main content area
+        self.content_frame = ttk.Frame(self.main_frame, style='FRED.TFrame')
+        self.content_frame.pack(side='left', expand=True, fill='both')
+        
+        # Create conversation display with dark purplish glass effect
+        self.conversation_frame = ttk.Frame(
+            self.content_frame, 
+            style='Panel.TFrame',
+            padding=2
+        )
+        self.conversation_frame.pack(expand=True, fill='both', padx=5, pady=5)
+        
+        # Chat display with enhanced styling
         self.chat_display = scrolledtext.ScrolledText(
-            self.chat_frame,
+            self.conversation_frame,
             wrap=tk.WORD,
-            width=80,
+            width=70,
             height=30,
-            font=("Consolas", 11),
-            bg='#0d1a2a',
-            fg='#00bfff',
-            insertbackground='#00dfff',
+            font=(self.fonts['mono'], 11),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            insertbackground=self.colors['stark_blue'],
             relief='flat',
             borderwidth=0,
             padx=20,
             pady=20
         )
-        # Custom scrollbar styling
+        self.chat_display.pack(expand=True, fill='both', padx=2, pady=2)
+        
+        # Advanced scrollbar styling
         self.chat_display.vbar.configure(
-            troughcolor='#0a1520',
-            bg='#00bfff',
-            activebackground='#00dfff',
+            troughcolor=self.colors['bg_dark'],
+            bg=self.colors['accent'],
+            activebackground=self.colors['accent_bright'],
             width=8
         )
         
-        # Input area with glowing effect
-        self.input_container = ttk.Frame(self.main_frame, style='Neural.TFrame')
+        # Create right visualizer panel (holographic display)
+        self.right_panel = ttk.Frame(self.main_frame, style='FRED.TFrame', width=250)
+        self.right_panel.pack(side='right', fill='y', padx=5, pady=5)
+        self.right_panel.pack_propagate(False)  # Maintain fixed width
+        
+        # Create holographic visualization area - expanded to fill available space
+        self.holo_display_frame = ttk.Frame(self.right_panel, style='Panel.TFrame')
+        self.holo_display_frame.pack(fill='both', expand=True, pady=(5, 5))
+        
+        # System metrics display moved below memory access
+        self.metrics_frame = ttk.Frame(self.right_panel, style='Panel.TFrame')
+        self.metrics_frame.pack(fill='x', expand=False, pady=(5, 10))
+        
+        # Title for metrics
+        ttk.Label(
+            self.metrics_frame,
+            text="SYSTEM ANALYTICS",
+            style='Status.TLabel',
+            anchor='center'
+        ).pack(fill='x', pady=5)
+        
+        # System stats in a clean, minimal layout
+        for label, value in [
+            ("HOST", self.system_info.get("hostname", "UNKNOWN")),
+            ("OS", self.system_info.get("os", "UNKNOWN")),
+            ("PROC", self.system_info.get("processor", "UNKNOWN").split()[0]),
+            ("MEM", self.system_info.get("memory", "UNKNOWN"))
+        ]:
+            stat_frame = ttk.Frame(self.metrics_frame, style='Panel.TFrame')
+            stat_frame.pack(fill='x', padx=10, pady=2)
+            
+            ttk.Label(
+                stat_frame,
+                text=f"{label}:",
+                style='Data.TLabel'
+            ).pack(side='left', padx=5)
+            
+            ttk.Label(
+                stat_frame,
+                text=value[:20] + "..." if len(value) > 20 else value,
+                foreground=self.colors['text_primary'],
+                background=self.colors['bg_medium'],
+                font=(self.fonts['mono'], 9)
+            ).pack(side='right', padx=5)
+        
+        # Command input field - floating design with glow effect
+        self.input_container = ttk.Frame(self.content_frame, style='FRED.TFrame')
+        self.input_container.pack(fill='x', padx=5, pady=10)
+        
         self.input_frame = ttk.Frame(
             self.input_container,
-            style='Neural.TFrame',
+            style='Panel.TFrame',
             padding=(10, 5)
         )
+        self.input_frame.pack(fill='x', expand=True)
         
+        # Input field with subtle glow
         self.input_field = ttk.Entry(
             self.input_frame,
-            width=70,
-            font=("Rajdhani", 11),
-            style='Neural.TEntry'
+            font=(self.fonts['heading'], 12),
+            style='FRED.TEntry'
         )
         self.input_field.bind("<Return>", self._on_send)
+        self.input_field.pack(side='left', expand=True, fill='x', padx=(5, 10))
         
-        # Holographic send button with neon glow effect
+        # Send button with arc reactor-inspired design
         self.send_button = tk.Button(
             self.input_frame,
-            text="TRANSMIT",
+            text="PROCESS",
             command=self._on_send,
-            font=('Rajdhani', 11, 'bold'),
-            bg='#0d1a2a',
-            fg='#00bfff',
-            activebackground='#102030',
-            activeforeground='#00dfff',
+            font=(self.fonts['heading'], 11, 'bold'),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['stark_blue'],
+            activebackground=self.colors['accent_dim'],
+            activeforeground=self.colors['stark_glow'],
             relief='flat',
             padx=15,
             pady=5,
             cursor='hand2',
             bd=0
         )
-        self.send_button.bind("<Enter>", self._on_button_hover)
-        self.send_button.bind("<Leave>", self._on_button_leave)
+        self.send_button.pack(side='right')
         
-        # Status bar with additional system info
-        self.status_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
-        self.status_bar = ttk.Label(
-            self.status_frame,
-            text="SYSTEMS READY",
-            style='Neural.TLabel'
-        )
-        
-        # Create particle canvas for thinking animation (overlayed on chat area)
-        self.particle_canvas = tk.Canvas(
-            self.chat_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            width=self.chat_frame.winfo_width(),
-            height=50
-        )
-        
-        # Voice feedback indicator with pulsating neon ring
-        self.voice_indicator = tk.Canvas(
-            self.input_frame,
-            width=20,
-            height=20,
-            bg='#0d1a2a',
-            highlightthickness=0
-        )
-        self.voice_indicator.create_oval(
-            2, 2, 18, 18,
-            fill='#0d1a2a',
-            outline='#00bfff',
-            width=2,
-            tags='voice_ring'
-        )
-        
-        # Add neural network visualization with dynamic neon nodes
-        self.neural_canvas = tk.Canvas(
-            self.chat_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            width=150,
-            height=150
-        )
-        self._create_neural_network()
-        
-        # Environment analysis display with updated neon bars
-        self.env_frame = ttk.Frame(self.main_frame, style='Neural.TFrame')
-        self.env_canvas = tk.Canvas(
-            self.env_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            width=200,
-            height=30
-        )
-        self._create_env_display()
-        
-        # Visualization overlays – hexagonal grid background and data stream effect
-        self.visualization_frame = ttk.Frame(self.chat_frame, style='Neural.TFrame')
-        
-        self.hex_canvas = tk.Canvas(
-            self.visualization_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            height=self.chat_frame.winfo_height()
-        )
-        self._create_hex_grid()
-        
-        self.stream_canvas = tk.Canvas(
-            self.visualization_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            width=30,
-            height=self.chat_frame.winfo_height()
-        )
-        self._create_data_stream()
-        
-        # Frequency analyzer visualization for added tech flair
-        self.freq_canvas = tk.Canvas(
-            self.chat_frame,
-            bg='#0d1a2a',
-            highlightthickness=0,
-            height=40
-        )
-        self._create_frequency_analyzer()
-
-    def create_reactor_logo(self):
-        """Create an enhanced 3D Arc Reactor inspired logo with glowing, rotating layers"""
-        center_x, center_y = 100, 100
-        self.reactor_layers = []
-        
-        # Create multiple rotating layers
-        for i in range(5):
-            layer = {
-                'rings': [],
-                'particles': [],
-                'z': i * 10,  # Z-depth for 3D effect
-                'rotation': random.random() * 360
-            }
-            # Adjust radius for each layer to add depth and glow
-            radius = 40 - (i * 5)
-            for j in range(3):
-                # Draw multiple overlapping arcs for a glowing effect
-                ring = self.logo_canvas.create_arc(
-                    center_x - radius - (j * 3),
-                    center_y - radius - (j * 3),
-                    center_x + radius + (j * 3),
-                    center_y + radius + (j * 3),
-                    start=0,
-                    extent=300,
-                    outline=self._adjust_color_brightness('#00bfff', 0.7 - (i * 0.1)),
-                    width=2,
-                    style='arc'
-                )
-                layer['rings'].append(ring)
-            # Add orbiting particles with subtle oscillations
-            for _ in range(6):
-                angle = random.random() * 360
-                particle = self.logo_canvas.create_oval(
-                    0, 0, 4, 4,
-                    fill='#00bfff',
-                    outline='#00bfff'
-                )
-                layer['particles'].append({
-                    'id': particle,
-                    'angle': angle,
-                    'speed': 1 + random.random() * 2,
-                    'radius': radius
-                })
-            self.reactor_layers.append(layer)
-        
-        # Create core elements with pulsating neon glow
-        self.reactor_core = {
-            'inner': self.logo_canvas.create_oval(
-                center_x - 15, center_y - 15,
-                center_x + 15, center_y + 15,
-                fill='#00bfff',
-                outline='#00bfff'
-            ),
-            'outer': self.logo_canvas.create_oval(
-                center_x - 20, center_y - 20,
-                center_x + 20, center_y + 20,
-                fill='',
-                outline='#00bfff',
-                width=2
-            ),
-            'energy_rings': []
-        }
-        for i in range(3):
-            ring = self.logo_canvas.create_oval(
-                center_x - 25 - (i * 5),
-                center_y - 25 - (i * 5),
-                center_x + 25 + (i * 5),
-                center_y + 25 + (i * 5),
-                fill='',
-                outline=self._adjust_color_brightness('#00bfff', 0.5),
-                width=1
-            )
-            self.reactor_core['energy_rings'].append(ring)
-        
-        self._animate_enhanced_reactor()
-
-    def _animate_enhanced_reactor(self):
-        """Animate the enhanced reactor with rotating layers, orbiting particles and pulsating core"""
-        if not hasattr(self, 'reactor_layers'):
-            return
-            
-        center_x, center_y = 100, 100
-        t = time.time()
-        
-        for layer in self.reactor_layers:
-            layer['rotation'] += 0.5 * (1 + layer['z'] / 50)
-            for ring in layer['rings']:
-                self.logo_canvas.itemconfig(ring, start=layer['rotation'])
-            for particle in layer['particles']:
-                particle['angle'] += particle['speed']
-                x = center_x + math.cos(math.radians(particle['angle'])) * particle['radius']
-                y = center_y + math.sin(math.radians(particle['angle'])) * particle['radius'] * 0.3
-                y += math.sin(t * 2 + particle['angle']) * 5
-                self.logo_canvas.coords(
-                    particle['id'],
-                    x - 2, y - 2, x + 2, y + 2
-                )
-                opacity = 0.5 + math.sin(math.radians(particle['angle'])) * 0.5
-                color = self._adjust_color_brightness('#00bfff', opacity)
-                self.logo_canvas.itemconfig(particle['id'], fill=color, outline=color)
-        
-        # Core pulsing effect
-        core_pulse = abs(math.sin(t * 2)) * 0.3 + 0.7
-        core_color = self._adjust_color_brightness('#00bfff', core_pulse)
-        self.logo_canvas.itemconfig(self.reactor_core['inner'], fill=core_color, outline=core_color)
-        
-        # Energy rings pulsate and scale for a dynamic effect
-        for i, ring in enumerate(self.reactor_core['energy_rings']):
-            ring_pulse = abs(math.sin(t * 2 + i * math.pi / 3))
-            ring_color = self._adjust_color_brightness('#00bfff', ring_pulse * 0.5)
-            self.logo_canvas.itemconfig(ring, outline=ring_color)
-            scale = 1 + ring_pulse * 0.1
-            self.logo_canvas.coords(
-                ring,
-                center_x - (25 + i * 5) * scale,
-                center_y - (25 + i * 5) * scale,
-                center_x + (25 + i * 5) * scale,
-                center_y + (25 + i * 5) * scale
-            )
-        
-        self.root.after(20, self._animate_enhanced_reactor)
-
-    def create_action_buttons(self):
-        """Create holographic action buttons with enhanced visual effects"""
-        # Add a system status display above the buttons
-        self.system_status_frame = ttk.Frame(self.actions_frame, style='Sidebar.TFrame')
-        self.system_status_frame.pack(fill='x', padx=10, pady=10)
-        
-        # System status indicator
-        status_label = ttk.Label(
-            self.system_status_frame,
-            text="SYSTEM STATUS",
-            style='Neural.TLabel',
-            font=('Rajdhani', 9)
-        )
-        status_label.pack(anchor='w')
-        
-        # Create circular status indicators
-        self.systems_canvas = tk.Canvas(
-            self.system_status_frame,
-            width=200,
-            height=30,
-            bg=self.colors['bg_medium'],
-            highlightthickness=0
-        )
-        self.systems_canvas.pack(fill='x', pady=5)
-        
-        # Create status indicators for different systems
-        self.system_indicators = {}
-        systems = ['CORE', 'MEMORY', 'NETWORK', 'SENSORS']
-        
-        for i, system in enumerate(systems):
-            x_pos = 20 + i * 50
-            # Background circle
-            self.systems_canvas.create_oval(
-                x_pos - 8, 15 - 8,
-                x_pos + 8, 15 + 8,
-                fill=self.colors['bg_dark'],
-                outline=self.colors['accent_dim'],
-                width=1
-            )
-            # Status indicator
-            indicator = self.systems_canvas.create_oval(
-                x_pos - 5, 15 - 5,
-                x_pos + 5, 15 + 5,
-                fill=self.colors['success'],
-                outline=''
-            )
-            # Label
-            self.systems_canvas.create_text(
-                x_pos, 30,
-                text=system,
-                fill=self.colors['accent_dim'],
-                font=('Rajdhani', 7)
-            )
-            self.system_indicators[system] = indicator
-        
-        # Simulate occasional status changes for dynamic effect
-        self._animate_system_indicators()
-        
-        # Action buttons with holographic design
-        actions = [
-            ("🔍 SCAN", lambda: self._on_send(None, "Scan systems"), "Analyze system status"),
-            ("💡 ASSIST", lambda: self._on_send(None, "What can you help me with?"), "Get assistance"),
-            ("🔄 RESET", self._clear_chat, "Clear current session"),
-            ("⚙️ SETTINGS", self._show_settings, "Configure F.R.E.D. settings")
-        ]
-        
-        for text, command, tooltip in actions:
-            btn_frame = ttk.Frame(self.actions_frame, style='Sidebar.TFrame')
-            btn_frame.pack(fill='x', padx=10, pady=3)
-            
-            # Create a canvas for the holographic button effect
-            btn_canvas = tk.Canvas(
-                btn_frame,
-                height=40,
-                bg=self.colors['bg_medium'],
-                highlightthickness=0
-            )
-            btn_canvas.pack(fill='x')
-            
-            # Create button directly on canvas
-            btn_rect = btn_canvas.create_rectangle(
-                0, 0, 200, 40,
-                fill=self.colors['bg_medium'],
-                outline=self.colors['accent'],
-                width=1,
-                tags=f"button_{text}"
-            )
-            
-            # Add decoration lines for tech feel
-            btn_canvas.create_line(
-                0, 0, 10, 0,
-                fill=self.colors['accent_bright'],
-                width=2,
-                tags=f"button_{text}"
-            )
-            btn_canvas.create_line(
-                0, 0, 0, 10,
-                fill=self.colors['accent_bright'],
-                width=2,
-                tags=f"button_{text}"
-            )
-            btn_canvas.create_line(
-                200, 40, 190, 40,
-                fill=self.colors['accent_bright'],
-                width=2,
-                tags=f"button_{text}"
-            )
-            btn_canvas.create_line(
-                200, 40, 200, 30,
-                fill=self.colors['accent_bright'],
-                width=2,
-                tags=f"button_{text}"
-            )
-            
-            # Add text with glow effect
-            glow = btn_canvas.create_text(
-                100, 20,
-                text=text,
-                fill=self.colors['accent_bright'],
-                font=('Rajdhani', 11, 'bold'),
-                tags=f"button_{text}"
-            )
-            
-            # Add hover effects
-            def on_enter(e, canvas=btn_canvas, tags=f"button_{text}"):
-                canvas.itemconfig(tags, fill=self.colors['bg_light'])
-            
-            def on_leave(e, canvas=btn_canvas, tags=f"button_{text}", rect=btn_rect):
-                canvas.itemconfig(tags, fill=self.colors['bg_medium'])
-                canvas.itemconfig(rect, fill=self.colors['bg_medium'])
-            
-            def on_click(e, cmd=command, canvas=btn_canvas, tags=f"button_{text}"):
-                canvas.itemconfig(tags, fill=self.colors['bg_dark'])
-                self.root.after(100, cmd)
-            
-            btn_canvas.tag_bind(f"button_{text}", "<Enter>", on_enter)
-            btn_canvas.tag_bind(f"button_{text}", "<Leave>", on_leave)
-            btn_canvas.tag_bind(f"button_{text}", "<Button-1>", on_click)
-            
-            self._create_tooltip(btn_canvas, tooltip)
-
-    def _create_tooltip(self, widget, text):
-        """Create a floating tooltip for widgets"""
-        def enter(event):
-            x, y, _, _ = widget.bbox("insert")
-            x += widget.winfo_rootx() + 25
-            y += widget.winfo_rooty() + 20
-            
-            self.tooltip = tk.Toplevel(widget)
-            self.tooltip.wm_overrideredirect(True)
-            self.tooltip.wm_geometry(f"+{x}+{y}")
-            
-            label = ttk.Label(
-                self.tooltip,
-                text=text,
-                justify='left',
-                background='#0d1a2a',
-                foreground='#00bfff',
-                relief='solid',
-                borderwidth=1,
-                font=("Rajdhani", 9)
-            )
-            label.pack()
-        
-        def leave(event):
-            if hasattr(self, 'tooltip'):
-                self.tooltip.destroy()
-        
-        widget.bind('<Enter>', enter)
-        widget.bind('<Leave>', leave)
-
-    def _on_button_hover(self, event):
-        self.send_button.configure(bg='#102030', fg='#00dfff')
-
-    def _on_button_leave(self, event):
-        self.send_button.configure(bg='#0d1a2a', fg='#00bfff')
-
-    def _update_metrics(self):
-        """Update system metrics with smooth animations"""
-        try:
-            import psutil
-            cpu = psutil.cpu_percent()
-            memory = psutil.virtual_memory().percent
-            
-            if hasattr(self, 'cpu_bar') and hasattr(self, 'memory_bar'):
-                # Smoothly animate CPU bar
-                current_cpu_width = self.cpu_canvas.coords(self.cpu_bar)[2] 
-                target_cpu_width = (cpu / 100) * 100
-                delta_cpu = (target_cpu_width - current_cpu_width) * 0.2
-                self.cpu_canvas.coords(self.cpu_bar, 0, 0, current_cpu_width + delta_cpu, 15)
-                
-                # Change CPU bar color based on usage
-                if cpu > 80:
-                    cpu_color = self.colors['highlight']
-                elif cpu > 50:
-                    cpu_color = self.colors['warning']
-                else:
-                    cpu_color = self.colors['accent']
-                self.cpu_canvas.itemconfig(self.cpu_bar, fill=cpu_color)
-                
-                # Smoothly animate memory bar
-                current_mem_width = self.memory_canvas.coords(self.memory_bar)[2]
-                target_mem_width = (memory / 100) * 100
-                delta_mem = (target_mem_width - current_mem_width) * 0.2
-                self.memory_canvas.coords(self.memory_bar, 0, 0, current_mem_width + delta_mem, 15)
-                
-                # Change memory bar color based on usage
-                if memory > 80:
-                    mem_color = self.colors['highlight']
-                elif memory > 50:
-                    mem_color = self.colors['warning']
-                else:
-                    mem_color = self.colors['accent']
-                self.memory_canvas.itemconfig(self.memory_bar, fill=mem_color)
-                
-                # Update labels
-                self.cpu_label.config(text=f"CPU {cpu:.0f}%")
-                self.memory_label.config(text=f"MEM {memory:.0f}%")
-        except (ImportError, Exception) as e:
-            # Fallback with simulated values if psutil isn't available
-            cpu = 25 + 15 * math.sin(time.time() / 5)
-            memory = 40 + 10 * math.sin(time.time() / 7)
-            
-            if hasattr(self, 'cpu_bar') and hasattr(self, 'memory_bar'):
-                self.cpu_canvas.coords(self.cpu_bar, 0, 0, cpu, 15)
-                self.memory_canvas.coords(self.memory_bar, 0, 0, memory, 15)
-                self.cpu_label.config(text=f"CPU {cpu:.0f}%")
-                self.memory_label.config(text=f"MEM {memory:.0f}%")
-        
-        self.root.after(1000, self._update_metrics)
-    
-    def _pulse_status_circle(self):
-        t = time.time() * 2
-        pulse = abs(math.sin(t)) * 0.3 + 0.7
-        color = self._adjust_color_brightness(self.colors['accent'], pulse)
-        if hasattr(self, 'status_circle'):
-            self.status_canvas.itemconfig(self.status_circle, fill=color)
-
-    def _adjust_color_brightness(self, color, factor):
-        # Convert hex to RGB and adjust brightness
-        r = int(color[1:3], 16)
-        g = int(color[3:5], 16)
-        b = int(color[5:7], 16)
-        r = min(255, max(0, int(r * factor)))
-        g = min(255, max(0, int(g * factor)))
-        b = min(255, max(0, int(b * factor)))
-        return f'#{r:02x}{g:02x}{b:02x}'
-
-    def _setup_layout(self):
-        self.container.pack(expand=True, fill='both')
-        self.sidebar.pack(side='left', fill='y')
-        self.logo_frame.pack(fill='x', pady=(10, 5))
-        self.logo_canvas.pack(expand=True)
-        
-        # Use our updated Title style for the sidebar title
-        self.sidebar_title.configure(style='Title.TLabel')
-        self.sidebar_title.pack(fill='x', pady=(0, 10), padx=20)
-        
-        # Create a separator with enhanced pulsing glow effect
-        self.separator_canvas = tk.Canvas(
-            self.sidebar, 
-            height=2, 
-            bg=self.colors['bg_medium'],
-            highlightthickness=0
-        )
-        self.separator_canvas.pack(fill='x', padx=10, pady=5)
-        self._animate_separator()
-        
-        self.actions_frame.pack(fill='x', pady=10, side='bottom')
-        self.main_frame.pack(side='left', expand=True, fill='both')
-        self.header_frame.pack(fill='x', pady=(0, 10))
-        self.chat_frame.pack(expand=True, fill='both', pady=(0, 20))
-        self.chat_display.pack(expand=True, fill='both')
-        
-        # Tech overlay pattern
-        self.overlay_canvas = tk.Canvas(
-            self.chat_frame,
-            bg=self.colors['bg_medium'],
-            highlightthickness=0,
-            width=self.chat_frame.winfo_width(),
-            height=20
-        )
-        self.overlay_canvas.place(x=0, y=0, relwidth=1)
-        self._create_tech_pattern()
-        
-        # Data stream effect and hex grid overlays
-        self.stream_canvas.place(relx=1, rely=0, anchor='ne', relheight=1)
-        self.hex_canvas.place(relx=1, rely=0, anchor='ne', relwidth=0.2, relheight=1)
-        
-        # Enhanced input container with holographic design
-        self.input_container.pack(fill='x', padx=20, pady=10)
-        
-        # Create radial background for input field
-        self.input_radial_frame = tk.Frame(
-            self.input_container,
-            bg=self.colors['bg_medium'],
-            highlightthickness=0
-        )
-        self.input_radial_frame.pack(fill='x', expand=True, pady=5)
-        
-        # Circular 'glow' behind input
-        self.input_radial_canvas = tk.Canvas(
-            self.input_radial_frame,
-            bg=self.colors['bg_medium'],
-            highlightthickness=0,
-            height=50
-        )
-        self.input_radial_canvas.pack(fill='x', pady=5)
-        self._create_input_radial()
-        
-        self.input_frame.pack(fill='x', expand=True)
-        self.input_border = tk.Canvas(
-            self.input_frame, 
-            height=2, 
+        # Create thinking indicator
+        self.thinking_indicator_canvas = tk.Canvas(
+            self.input_container, 
+            height=3,
             bg=self.colors['bg_dark'], 
             highlightthickness=0
         )
-        self.input_border.pack(fill='x', side='bottom')
+        self.thinking_indicator_canvas.pack(fill='x', pady=(5, 0))
         
-        # Include voice indicator next to input field for JARVIS-like activation
-        self.voice_indicator.pack(side='left', padx=(0, 10))
-        self.input_field.pack(side='left', expand=True, fill='x', padx=(0, 10))
+    def _initialize_arc_reactor(self):
+        """Create the globe visualization for F.R.E.D."""
+        # Ensure canvas is created
+        if not hasattr(self, 'arc_reactor_canvas'):
+            return
+            
+        # Get canvas dimensions
+        width = 180
+        height = 180
+        center_x = width / 2
+        center_y = height / 2
         
-        # Update send button to match holographic style
-        self.send_button.configure(
-            bg=self.colors['bg_medium'],
-            fg=self.colors['accent_bright'],
-            activebackground=self.colors['bg_light'],
-            activeforeground='#ffffff',
-            text="TRANSMIT"
+        # Create outer ring (globe container) with pulsing effect
+        outer_radius = 75
+        self.arc_reactor_canvas.create_oval(
+            center_x - outer_radius, center_y - outer_radius,
+            center_x + outer_radius, center_y + outer_radius,
+            outline=self.colors['stark_blue'],
+            width=2,
+            tags="reactor_ring"
         )
-        self.send_button.pack(side='right')
         
-        self.status_frame.pack(fill='x', pady=(10, 0))
-        self.status_bar.pack(side='left')
+        # Create middle ring - represents equator with variable thickness
+        middle_radius = 60
+        self.arc_reactor_canvas.create_oval(
+            center_x - middle_radius, center_y - middle_radius,
+            center_x + middle_radius, center_y + middle_radius,
+            outline=self.colors['stark_blue'],
+            width=1.5,
+            tags="reactor_ring"
+        )
         
-        # Bind focus events for input field glow effect
-        self.input_field.bind("<FocusIn>", self._start_input_glow)
-        self.input_field.bind("<FocusOut>", self._stop_input_glow)
-        self.input_field.focus_set()
-        
-        self._start_animations()
-    
-    def _create_input_radial(self):
-        """Create a radial glow effect behind the input field"""
-        width = self.input_radial_canvas.winfo_width() or 400
-        height = self.input_radial_canvas.winfo_height()
-        center_x = width // 2
-        
-        # Create circular gradient
-        self.input_glow = []
-        for i in range(10, 0, -1):
-            radius = 25 - i
-            alpha = 0.08 - (i * 0.005)
-            color = self._adjust_color_brightness(self.colors['accent'], alpha)
-            glow = self.input_radial_canvas.create_oval(
-                center_x - radius, 25 - radius,
-                center_x + radius, 25 + radius,
-                fill=color,
-                outline='',
-                tags='glow'
+        # Create globe meridians with varying opacity
+        for i in range(6):
+            angle = math.pi * i / 6
+            # Vertical meridian with varying opacity
+            opacity = 0.3 + 0.7 * (i % 2)  # Alternate opacity for visual interest
+            color = self._adjust_color_opacity(self.colors['accent'], opacity)
+            
+            self.arc_reactor_canvas.create_arc(
+                center_x - middle_radius, center_y - middle_radius,
+                center_x + middle_radius, center_y + middle_radius,
+                start=i*30, extent=2,
+                outline=color,
+                style="arc",
+                tags="reactor_meridian"
             )
-            self.input_glow.append((glow, radius))
         
-        # Input field positioning line
-        self.input_radial_canvas.create_line(
-            0, 25, width, 25,
-            fill=self._adjust_color_brightness(self.colors['accent'], 0.2),
-            dash=(3, 5),
-            tags='glow'
+        # Create globe parallels with varying thickness
+        for i in range(3):
+            radius = middle_radius * (0.25 + 0.25 * i)
+            thickness = 1.5 - 0.5 * i  # Thinner lines for inner parallels
+            self.arc_reactor_canvas.create_oval(
+                center_x - radius, center_y - radius,
+                center_x + radius, center_y + radius,
+                outline=self.colors['accent_dim'],
+                width=thickness,
+                tags="reactor_parallel"
+            )
+        
+        # Create core with pulsing effect
+        core_radius = 25
+        self.arc_core = self.arc_reactor_canvas.create_oval(
+            center_x - core_radius, center_y - core_radius,
+            center_x + core_radius, center_y + core_radius,
+            fill=self.colors['stark_blue'],
+            outline=self.colors['stark_glow'],
+            width=2,
+            tags="reactor_core"
         )
         
-        # Add some tech decorations
-        for x in range(0, width, 25):
-            if x != center_x:  # Skip the center point
-                size = 2
-                self.input_radial_canvas.create_rectangle(
-                    x - size, 25 - size,
-                    x + size, 25 + size,
-                    fill=self.colors['accent_dim'],
-                    outline='',
-                    tags='glow'
+        # Add data points with varying sizes and colors
+        self.data_points = []
+        self.data_point_speeds = []  # Store individual rotation speeds
+        for i in range(10):
+            angle = 2 * math.pi * random.random()
+            radius = middle_radius * 0.3 + middle_radius * 0.6 * random.random()
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            
+            # Vary point size based on distance from center
+            size = 2 + (radius / middle_radius) * 2
+            
+            # Vary color based on position
+            hue = (angle / (2 * math.pi) + 0.5) % 1.0  # Full color spectrum
+            rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
+            color = f'#{int(rgb[0]*255):02x}{int(rgb[1]*255):02x}{int(rgb[2]*255):02x}'
+            
+            point = self.arc_reactor_canvas.create_oval(
+                x-size, y-size, x+size, y+size,
+                fill=color,
+                outline="",
+                tags="data_points"
+            )
+            self.data_points.append(point)
+            
+            # Assign random rotation speed to each point
+            speed = 0.5 + random.random() * 2  # Speed between 0.5 and 2.5
+            self.data_point_speeds.append(speed)
+        
+        # Connection lines between data points with varying opacity
+        for i in range(len(self.data_points) - 1):
+            coords1 = self.arc_reactor_canvas.coords(self.data_points[i])
+            coords2 = self.arc_reactor_canvas.coords(self.data_points[i+1])
+            
+            x1 = (coords1[0] + coords1[2]) / 2
+            y1 = (coords1[1] + coords1[3]) / 2
+            
+            x2 = (coords2[0] + coords2[2]) / 2
+            y2 = (coords2[1] + coords2[3]) / 2
+            
+            # Calculate distance for opacity
+            distance = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+            opacity = 0.2 + 0.8 * (1 - distance / (2 * 60))  # 60 is middle_radius
+            color = self._adjust_color_opacity(self.colors['accent_dim'], opacity)
+            
+            self.arc_reactor_canvas.create_line(
+                x1, y1, x2, y2,
+                fill=color,
+                width=1,
+                dash=(3, 3),
+                tags="data_connections"
+            )
+        
+        # Create circular glow with dynamic radius
+        glow_radius = 85
+        self.arc_glow = self.arc_reactor_canvas.create_oval(
+            center_x - glow_radius, center_y - glow_radius,
+            center_x + glow_radius, center_y + glow_radius,
+            outline="",
+            fill="",
+            tags="reactor_glow"
+        )
+                
+        # Start rotation animation and pulse
+        self._start_arc_pulse()
+        self._start_globe_rotation()
+        
+        # Create radial menu buttons (minimalist)
+        self._create_radial_menu()
+    
+    def _adjust_color_opacity(self, color, opacity):
+        """Adjust color opacity while maintaining the color"""
+        # Convert hex to RGB
+        r = int(color[1:3], 16)
+        g = int(color[3:5], 16)
+        b = int(color[5:7], 16)
+        
+        # Adjust opacity
+        r = int(r * opacity)
+        g = int(g * opacity)
+        b = int(b * opacity)
+        
+        # Convert back to hex
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def _start_globe_rotation(self):
+        """Animate the globe to rotate slowly with variable speeds"""
+        self.globe_rotation_active = True
+        
+        def rotate_globe():
+            if not hasattr(self, 'arc_reactor_canvas') or not self.globe_rotation_active:
+                return
+                
+            # Dimensions needed for calculations
+            width = 180
+            height = 180
+            center_x = width / 2
+            center_y = height / 2
+            
+            # Protect against race conditions by checking if items still exist
+            try:
+                # Rotate meridians at different speeds
+                meridian_speeds = [0.5, 1.0, 1.5]  # Different speeds for different meridians
+                meridians = self.arc_reactor_canvas.find_withtag("reactor_meridian")
+                
+                for i, item in enumerate(meridians):
+                    try:
+                        start = float(self.arc_reactor_canvas.itemcget(item, "start"))
+                        speed = meridian_speeds[i % len(meridian_speeds)]
+                        new_start = (start + speed) % 360
+                        self.arc_reactor_canvas.itemconfig(item, start=new_start)
+                    except (ValueError, tk.TclError):
+                        pass
+                
+                # Move data points in circular motion with individual speeds
+                valid_points = []
+                valid_speeds = []
+                
+                for point, speed in zip(self.data_points, self.data_point_speeds):
+                    try:
+                        if not self.arc_reactor_canvas.winfo_exists():
+                            return
+                            
+                        coords = self.arc_reactor_canvas.coords(point)
+                        if len(coords) == 4:
+                            x = (coords[0] + coords[2]) / 2
+                            y = (coords[1] + coords[3]) / 2
+                            
+                            rel_x = x - center_x
+                            rel_y = y - center_y
+                            
+                            # Calculate new position with individual speed
+                            angle = math.radians(speed)
+                            new_x = center_x + rel_x * math.cos(angle) - rel_y * math.sin(angle)
+                            new_y = center_y + rel_x * math.sin(angle) + rel_y * math.cos(angle)
+                            
+                            # Update position
+                            self.arc_reactor_canvas.coords(
+                                point,
+                                new_x - 3, new_y - 3, new_x + 3, new_y + 3
+                            )
+                            valid_points.append(point)
+                            valid_speeds.append(speed)
+                    except (tk.TclError, IndexError):
+                        continue
+                
+                # Update data points and speeds lists
+                self.data_points = valid_points
+                self.data_point_speeds = valid_speeds
+                
+                # Update connection lines with dynamic opacity
+                try:
+                    self.arc_reactor_canvas.delete("data_connections")
+                    for i in range(len(self.data_points) - 1):
+                        try:
+                            coords1 = self.arc_reactor_canvas.coords(self.data_points[i])
+                            coords2 = self.arc_reactor_canvas.coords(self.data_points[i+1])
+                            
+                            if len(coords1) == 4 and len(coords2) == 4:
+                                x1 = (coords1[0] + coords1[2]) / 2
+                                y1 = (coords1[1] + coords1[3]) / 2
+                                
+                                x2 = (coords2[0] + coords2[2]) / 2
+                                y2 = (coords2[1] + coords2[3]) / 2
+                                
+                                # Calculate distance for opacity
+                                distance = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+                                opacity = 0.2 + 0.8 * (1 - distance / (2 * 60))  # 60 is middle_radius
+                                color = self._adjust_color_opacity(self.colors['accent_dim'], opacity)
+                                
+                                self.arc_reactor_canvas.create_line(
+                                    x1, y1, x2, y2,
+                                    fill=color,
+                                    width=1,
+                                    dash=(3, 3),
+                                    tags="data_connections"
+                                )
+                        except (tk.TclError, IndexError):
+                            continue
+                except Exception as e:
+                    print(f"Error updating connections: {e}")
+                
+                # Continue rotation with error handling
+                try:
+                    self.root.after(50, rotate_globe)
+                except Exception as e:
+                    print(f"Error in globe rotation: {e}")
+                    self.root.after(1000, self._start_globe_rotation)
+            except Exception as e:
+                print(f"Globe rotation error: {e}")
+                self.root.after(1000, self._start_globe_rotation)
+        
+        # Start rotation with error handling
+        try:
+            rotate_globe()
+        except Exception as e:
+            print(f"Failed to start globe rotation: {e}")
+    
+    def _create_holographic_display(self):
+        """Create memory access visualization in the right panel"""
+        # Display title with better styling
+        memory_title = ttk.Label(
+            self.holo_display_frame,
+            text="MEMORY ACCESS",
+            style='Status.TLabel',
+            anchor='center'
+        )
+        memory_title.pack(fill='x', pady=(5, 5))
+        
+        # Create tabs for different memory types
+        self.memory_notebook = ttk.Notebook(self.holo_display_frame)
+        self.memory_notebook.pack(fill='both', expand=True, padx=5, pady=2)
+        
+        # Create the memory notebook tabs for different memory types
+        self.semantic_frame = ttk.Frame(self.memory_notebook, style='Panel.TFrame')
+        self.episodic_frame = ttk.Frame(self.memory_notebook, style='Panel.TFrame')
+        self.dreaming_frame = ttk.Frame(self.memory_notebook, style='Panel.TFrame')
+        
+        # Add tabs to notebook
+        self.memory_notebook.add(self.semantic_frame, text="Semantic")
+        self.memory_notebook.add(self.episodic_frame, text="Episodic")
+        self.memory_notebook.add(self.dreaming_frame, text="Dreams")
+        
+        # Configure notebook tab styling
+        style = ttk.Style()
+        style.map("TNotebook.Tab",
+                background=[("selected", self.colors['accent_dim'])],
+                foreground=[("selected", self.colors['text_primary'])])
+        
+        # Create memory panels with search and scroll widgets
+        self.semantic_scroll = self._initialize_memory_panel(self.semantic_frame, 'semantic')
+        self.episodic_scroll = self._initialize_memory_panel(self.episodic_frame, 'episodic')
+        self.dreaming_scroll = self._initialize_memory_panel(self.dreaming_frame, 'dreaming')
+        
+        # Now load memories after all panels are initialized
+        self._load_memories()
+    
+    def _initialize_memory_panel(self, parent_frame, memory_type):
+        """Initialize a memory panel with search and return the scroll widget"""
+        # Create search frame at the top
+        search_frame = tk.Frame(parent_frame, bg=self.colors['bg_medium'])
+        search_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Search entry with placeholder
+        search_entry = tk.Entry(
+            search_frame,
+            font=(self.fonts['mono'], 10),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            insertbackground=self.colors['stark_blue'],
+            relief='flat',
+            bd=1
+        )
+        search_entry.pack(side='left', fill='x', expand=True, padx=5)
+        search_entry.insert(0, "Search memories...")
+        search_entry.config(fg=self.colors['text_secondary'])
+        
+        # Clear placeholder on focus
+        def _on_entry_focus_in(event):
+            if search_entry.get() == "Search memories...":
+                search_entry.delete(0, tk.END)
+                search_entry.config(fg=self.colors['text_primary'])
+                
+        # Restore placeholder on focus out if empty
+        def _on_entry_focus_out(event):
+            if not search_entry.get():
+                search_entry.insert(0, "Search memories...")
+                search_entry.config(fg=self.colors['text_secondary'])
+                
+        search_entry.bind("<FocusIn>", _on_entry_focus_in)
+        search_entry.bind("<FocusOut>", _on_entry_focus_out)
+        
+        # Create scrollable text widget for memories
+        memory_scroll = scrolledtext.ScrolledText(
+            parent_frame,
+            wrap=tk.WORD,
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            height=15,
+            relief='flat',
+            padx=10,
+            pady=10,
+            font=(self.fonts['mono'], 10)
+        )
+        memory_scroll.pack(fill='both', expand=True, padx=3, pady=3)
+        
+        # Configure text tags
+        memory_scroll.tag_config("memory_header", 
+            foreground=self.colors['hologram'],
+            font=(self.fonts['heading'], 11, 'bold'))
+        memory_scroll.tag_config("memory_category", 
+            foreground=self.colors['accent_bright'],
+            font=(self.fonts['heading'], 11))
+        memory_scroll.tag_config("memory_timestamp", 
+            foreground=self.colors['accent'],
+            font=(self.fonts['mono'], 10))
+        memory_scroll.tag_config("memory_tags", 
+            foreground=self.colors['accent_bright'],
+            font=(self.fonts['mono'], 9))
+        memory_scroll.tag_config("memory_content", 
+            foreground=self.colors['text_primary'],
+            font=(self.fonts['mono'], 10))
+        memory_scroll.tag_config("memory_separator", 
+            foreground=self.colors['grid_line'],
+            font=(self.fonts['mono'], 8))
+        memory_scroll.tag_config("empty_message", 
+            foreground=self.colors['text_secondary'],
+            font=(self.fonts['heading'], 11))
+            
+        # Create search button with hover effect
+        search_button = tk.Button(
+            search_frame,
+            text="Search",
+            font=(self.fonts['heading'], 9),
+            bg=self.colors['accent_dim'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=8,
+            pady=2,
+            command=lambda: self._filter_memories(memory_scroll, memory_type, search_entry.get())
+        )
+        search_button.pack(side='right', padx=5)
+        
+        # Add hover effect
+        def _on_enter(e):
+            search_button.config(bg=self.colors['accent'])
+            
+        def _on_leave(e):
+            search_button.config(bg=self.colors['accent_dim'])
+            
+        search_button.bind("<Enter>", _on_enter)
+        search_button.bind("<Leave>", _on_leave)
+        
+        # Bind Enter key to search
+        search_entry.bind("<Return>", lambda e: self._filter_memories(memory_scroll, memory_type, search_entry.get()))
+        
+        return memory_scroll
+    
+    def _load_memories(self):
+        """Load memories from JSON files"""
+        try:
+            # Import the memory format utility
+            import memory_format_utils
+            
+            # Ensure memory files are in the correct format
+            memory_format_utils.ensure_all_memory_files()
+            
+            # Initialize memories dictionary
+            self.memories = {
+                'semantic': [],
+                'episodic': [],
+                'dreaming': []
+            }
+            
+            # Also initialize memory backups
+            self.memory_backups = {
+                'semantic': [],
+                'episodic': [],
+                'dreaming': []
+            }
+            
+            # Load semantic memories
+            if os.path.exists('Semantic.json'):
+                try:
+                    with open('Semantic.json', 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.strip():  # Skip empty lines
+                                try:
+                                    memory = json.loads(line)
+                                    self.memories['semantic'].append(memory)
+                                except json.JSONDecodeError as e:
+                                    print(f"Error parsing semantic memory: {e}")
+                except Exception as e:
+                    print(f"Error loading semantic memories: {e}")
+            
+            # Load episodic memories
+            if os.path.exists('Episodic.json'):
+                try:
+                    with open('Episodic.json', 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.strip():  # Skip empty lines
+                                try:
+                                    memory = json.loads(line)
+                                    self.memories['episodic'].append(memory)
+                                except json.JSONDecodeError as e:
+                                    print(f"Error parsing episodic memory: {e}")
+                except Exception as e:
+                    print(f"Error loading episodic memories: {e}")
+            
+            # Load dreams
+            if os.path.exists('Dreaming.json'):
+                try:
+                    with open('Dreaming.json', 'r', encoding='utf-8') as f:
+                        for line in f:
+                            if line.strip():  # Skip empty lines
+                                try:
+                                    memory = json.loads(line)
+                                    self.memories['dreaming'].append(memory)
+                                except json.JSONDecodeError as e:
+                                    print(f"Error parsing dream memory: {e}")
+                except Exception as e:
+                    print(f"Error loading dream memories: {e}")
+            
+            # Update backups with loaded memories
+            for memory_type in self.memories:
+                self.memory_backups[memory_type] = self.memories[memory_type].copy()
+                
+            # Update memory stats
+            self._update_memory_stats()
+            
+            # Populate memory panels with loaded memories - using lambda that matches the edit_callback signature
+            self._populate_memory_panel(self.semantic_scroll, 'semantic', 
+                lambda idx: self._edit_memory('semantic', idx))
+                
+            self._populate_memory_panel(self.episodic_scroll, 'episodic', 
+                lambda idx: self._edit_memory('episodic', idx))
+                
+            self._populate_memory_panel(self.dreaming_scroll, 'dreaming', 
+                lambda idx: self._edit_memory('dreaming', idx))
+            
+            # Add memory control buttons
+            self._add_memory_control_buttons()
+                
+        except Exception as e:
+            print(f"Error in _load_memories: {e}")
+    
+    def _validate_memory_structure(self, memory, memory_type):
+        """Validate memory structure based on memory type"""
+        try:
+            if not isinstance(memory, dict):
+                return False
+                
+            if memory_type == 'semantic':
+                # Semantic requires category and content
+                if 'category' not in memory or 'content' not in memory:
+                    return False
+                    
+                # Check field types
+                if not isinstance(memory['category'], str) or not isinstance(memory['content'], str):
+                    return False
+                        
+                return True
+                
+            elif memory_type == 'dreaming':
+                # Dreams require insight_type and content
+                if 'insight_type' not in memory or 'content' not in memory:
+                    # For backward compatibility, check for category/about field
+                    if ('category' not in memory and 'about' not in memory) or 'content' not in memory:
+                        return False
+                    
+                # Check field types
+                if 'insight_type' in memory and not isinstance(memory['insight_type'], str):
+                    return False
+                if 'category' in memory and not isinstance(memory['category'], str):
+                    return False
+                if 'about' in memory and not isinstance(memory['about'], str):
+                    return False
+                if not isinstance(memory['content'], str):
+                    return False
+                
+                # Source field is optional, but if present, validate it
+                if 'source' in memory and not isinstance(memory['source'], str):
+                    return False
+                
+                # If adding a new dream without source, add default source
+                if 'source' not in memory:
+                    memory['source'] = 'unknown'
+                        
+                return True
+                
+            elif memory_type == 'episodic':
+                # Check required fields for episodic memory
+                required_fields = [
+                    'memory_timestamp', 'context_tags', 'conversation_summary',
+                    'what_worked', 'what_to_avoid', 'what_you_learned'
+                ]
+                
+                for field in required_fields:
+                    if field not in memory:
+                        return False
+                        
+                # Check context_tags is a list
+                if not isinstance(memory['context_tags'], list):
+                    return False
+                
+                # Check string fields
+                string_fields = ['memory_timestamp', 'conversation_summary', 
+                                'what_worked', 'what_to_avoid', 'what_you_learned']
+                for field in string_fields:
+                    if not isinstance(memory[field], str):
+                        return False
+                        
+                return True
+                
+            return False
+            
+        except Exception as e:
+            print(f"Error validating memory structure: {e}")
+            return False
+
+    def _update_memory_stats(self):
+        """Update memory stats in status bar"""
+        try:
+            stats_text = f"Semantic: {len(self.memories['semantic'])} | "
+            stats_text += f"Episodic: {len(self.memories['episodic'])} | "
+            stats_text += f"Dreams: {len(self.memories['dreaming'])}"
+            self.status_bar.config(text=stats_text)
+        except Exception as e:
+            print(f"Error updating memory stats: {e}")
+            self.status_bar.config(text="Error updating memory statistics")
+
+    def _save_memories(self, memory_type):
+        """Save memories to JSON file in JSONL format (one JSON object per line)"""
+        try:
+            filename = f"{memory_type.capitalize()}.json"
+            
+            # Create backup first
+            if os.path.exists(filename):
+                backup_file = f"{filename}.bak"
+                try:
+                    with open(filename, 'r', encoding='utf-8') as src:
+                        with open(backup_file, 'w', encoding='utf-8') as dst:
+                            dst.write(src.read())
+                except Exception as e:
+                    print(f"Error creating backup of {filename}: {e}")
+            
+            # Save memories in JSONL format (one JSON object per line)
+            with open(filename, 'w', encoding='utf-8') as f:
+                for memory in self.memories.get(memory_type, []):
+                    f.write(json.dumps(memory) + '\n')
+                    
+            # Update backup copy
+            self.memory_backups[memory_type] = self.memories[memory_type].copy()
+            
+            # Update status
+            self.status_bar.config(text=f"{memory_type.capitalize()} memories saved")
+            self.root.after(3000, self._update_memory_stats)
+            
+        except Exception as e:
+            print(f"Error saving {memory_type} memories: {e}")
+            self.status_bar.config(text=f"Error saving {memory_type} memories: {str(e)}")
+            self.root.after(3000, self._update_memory_stats)
+
+    def _restore_from_backup(self, memory_type):
+        """Restore memories from backup file"""
+        try:
+            if memory_type == 'semantic' and hasattr(self, 'semantic_scroll'):
+                # Restore semantic memories
+                self._restore_memory_file('Semantic.json', 
+                    self.semantic_scroll, 
+                    'semantic', 
+                    lambda idx: self._edit_memory('semantic', idx)
                 )
+            elif memory_type == 'episodic' and hasattr(self, 'episodic_scroll'):
+                # Restore episodic memories
+                self._restore_memory_file('Episodic.json',
+                    self.episodic_scroll, 
+                    'episodic', 
+                    lambda idx: self._edit_memory('episodic', idx)
+                )
+            elif memory_type == 'dreaming' and hasattr(self, 'dreaming_scroll'):
+                # Restore dream memories
+                self._restore_memory_file('Dreaming.json',
+                    self.dreaming_scroll, 
+                    'dreaming', 
+                    lambda idx: self._edit_memory('dreaming', idx)
+                )
+            else:
+                print(f"Invalid memory type: {memory_type}")
+                self.status_bar.config(text=f"Error: Invalid memory type: {memory_type}")
+                self.root.after(3000, self._update_memory_stats)
+        except Exception as e:
+            print(f"Error restoring {memory_type} memories: {e}")
+            self.status_bar.config(text=f"Error restoring memories: {str(e)}")
+            self.root.after(3000, self._update_memory_stats)
+
+    def _export_memories(self, memory_type):
+        """Export memories to a JSON file"""
+        try:
+            if memory_type not in self.memories or not self.memories[memory_type]:
+                messagebox.showinfo("Export", f"No {memory_type} memories to export")
+                return
+                
+            # Ask user for export format
+            export_format = messagebox.askyesno(
+                "Export Format", 
+                "Would you like to export as a JSON array?\n\n"
+                "Yes: Export as a single JSON array (better for sharing)\n"
+                "No: Export as JSONL format (one JSON object per line, better for importing)"
+            )
+                
+            # Ask user for export location
+            file_types = [("JSON files", "*.json"), ("All files", "*.*")]
+            export_file = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=file_types,
+                title=f"Export {memory_type.capitalize()} Memories",
+                initialfile=f"{memory_type}_export.json"
+            )
+            
+            if not export_file:
+                return  # User cancelled
+                
+            # Export memories
+            with open(export_file, 'w', encoding='utf-8') as f:
+                if export_format:  # JSON array
+                    json.dump(self.memories[memory_type], f, indent=2, ensure_ascii=False)
+                else:  # JSONL format
+                    for memory in self.memories[memory_type]:
+                        f.write(json.dumps(memory) + '\n')
+            
+            messagebox.showinfo("Export Complete", 
+                f"Successfully exported {len(self.memories[memory_type])} {memory_type} memories to {export_file}")
+                
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export memories: {str(e)}")
+
+    def _create_memory_panel(self, parent_frame, memory_type, edit_callback):
+        """Create a memory panel with enhanced search and filtering"""
+        # Create search frame at the top
+        search_frame = tk.Frame(parent_frame, bg=self.colors['bg_medium'])
+        search_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Search entry with placeholder
+        search_entry = tk.Entry(
+            search_frame,
+            font=(self.fonts['mono'], 10),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            insertbackground=self.colors['stark_blue'],
+            relief='flat',
+            bd=1
+        )
+        search_entry.pack(side='left', fill='x', expand=True, padx=5)
+        search_entry.insert(0, "Search memories...")
+        search_entry.config(fg=self.colors['text_secondary'])
+        
+        # Clear placeholder on focus
+        def _on_entry_focus_in(event):
+            if search_entry.get() == "Search memories...":
+                search_entry.delete(0, tk.END)
+                search_entry.config(fg=self.colors['text_primary'])
+                
+        # Restore placeholder on focus out if empty
+        def _on_entry_focus_out(event):
+            if not search_entry.get():
+                search_entry.insert(0, "Search memories...")
+                search_entry.config(fg=self.colors['text_secondary'])
+                
+        search_entry.bind("<FocusIn>", _on_entry_focus_in)
+        search_entry.bind("<FocusOut>", _on_entry_focus_out)
+        
+        # Search button with hover effect
+        search_button = tk.Button(
+            search_frame,
+            text="Search",
+            font=(self.fonts['heading'], 9),
+            bg=self.colors['accent_dim'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=8,
+            pady=2,
+            command=lambda: self._filter_memories(memory_scroll, memory_type, search_entry.get())
+        )
+        search_button.pack(side='right', padx=5)
+        
+        # Add hover effect
+        def _on_enter(e):
+            search_button.config(bg=self.colors['accent'])
+            
+        def _on_leave(e):
+            search_button.config(bg=self.colors['accent_dim'])
+            
+        search_button.bind("<Enter>", _on_enter)
+        search_button.bind("<Leave>", _on_leave)
+        
+        # Bind Enter key to search
+        search_entry.bind("<Return>", lambda e: self._filter_memories(memory_scroll, memory_type, search_entry.get()))
+        
+        # Create scrollable text widget for memories with enhanced styling
+        memory_scroll = scrolledtext.ScrolledText(
+            parent_frame,
+            wrap=tk.WORD,
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            height=15,
+            relief='flat',
+            padx=10,
+            pady=10,
+            font=(self.fonts['mono'], 10)
+        )
+        memory_scroll.pack(fill='both', expand=True, padx=3, pady=3)
+        
+        # Configure text tags with enhanced styling
+        memory_scroll.tag_config("memory_header", 
+            foreground=self.colors['hologram'],
+            font=(self.fonts['heading'], 11, 'bold'))
+        memory_scroll.tag_config("memory_category", 
+            foreground=self.colors['accent_bright'],
+            font=(self.fonts['heading'], 11))
+        memory_scroll.tag_config("memory_timestamp", 
+            foreground=self.colors['accent'],
+            font=(self.fonts['mono'], 10))
+        memory_scroll.tag_config("memory_tags", 
+            foreground=self.colors['accent_bright'],
+            font=(self.fonts['mono'], 9))
+        memory_scroll.tag_config("memory_content", 
+            foreground=self.colors['text_primary'],
+            font=(self.fonts['mono'], 10))
+        memory_scroll.tag_config("memory_separator", 
+            foreground=self.colors['grid_line'],
+            font=(self.fonts['mono'], 8))
+        memory_scroll.tag_config("empty_message", 
+            foreground=self.colors['text_secondary'],
+            font=(self.fonts['heading'], 11))
+        
+        # Populate memories based on type
+        self._populate_memory_panel(memory_scroll, memory_type, edit_callback)
     
-    def _start_input_glow(self, event):
-        """Start the input glow animation when focused"""
-        self._input_glow_active = True
-        self._animate_input_glow()
-    
-    def _stop_input_glow(self, event):
-        """Stop the input glow animation when focus is lost"""
-        self._input_glow_active = False
-    
-    def _animate_input_glow(self):
-        """Animate the input glow with a pulsing effect"""
-        if not hasattr(self, '_input_glow_active') or not self._input_glow_active:
+    def _populate_memory_panel(self, scroll_widget, memory_type, edit_callback, filter_text=None):
+        """Populate the memory panel with memory items, filtered if needed"""
+        # Clear existing content
+        scroll_widget.config(state=tk.NORMAL)
+        scroll_widget.delete(1.0, tk.END)
+        
+        memories = self.memories.get(memory_type, [])
+        
+        # Filter memories if filter_text is provided
+        if filter_text and filter_text != "Search memories...":
+            filter_text = filter_text.lower()
+            filtered_memories = []
+            
+            for mem in memories:
+                # Create search text based on memory type
+                if memory_type == 'semantic':
+                    search_text = f"{mem.get('category', '')} {mem.get('content', '')}".lower()
+                elif memory_type == 'episodic':
+                    tags = ' '.join(mem.get('context_tags', []))
+                    search_text = f"{mem.get('memory_timestamp', '')} {tags} {mem.get('conversation_summary', '')}".lower()
+                else:  # dreaming
+                    # Check for insight_type with fallback to category/about
+                    header = mem.get('insight_type', mem.get('category', mem.get('about', 'Unknown')))
+                    search_text = f"{header} {mem.get('content', '')}".lower()
+                
+                # Add memory if it matches search
+                if filter_text in search_text:
+                    filtered_memories.append(mem)
+            
+            memories = filtered_memories
+        
+        # Display message if no memories
+        if not memories:
+            if filter_text and filter_text != "Search memories...":
+                scroll_widget.insert(tk.END, f"No {memory_type} memories match your search.\n\n", "empty_message")
+            else:
+                scroll_widget.insert(tk.END, f"No {memory_type} memories found.\n\n", "empty_message")
+            scroll_widget.insert(tk.END, f"Create a new memory by clicking the 'Add {memory_type.capitalize()} Memory' button below.", "empty_message")
             return
         
-        t = time.time() * 2
-        pulse = abs(math.sin(t)) * 0.5 + 0.5
+        # Add memories with edit buttons
+        for i, memory in enumerate(memories):
+            if memory_type == 'semantic':
+                # Display category in accent color
+                category = memory.get('category', 'Unknown')
+                scroll_widget.insert(tk.END, f"Category: ", "memory_header")
+                scroll_widget.insert(tk.END, f"{category}\n", "memory_category")
+                
+                # Display content in primary text color
+                content = memory.get('content', 'No content')
+                scroll_widget.insert(tk.END, f"{content}\n", "memory_content")
+                
+            elif memory_type == 'episodic':
+                # Display timestamp in accent color
+                timestamp = memory.get('memory_timestamp', 'Unknown')
+                scroll_widget.insert(tk.END, f"Time: ", "memory_header")
+                scroll_widget.insert(tk.END, f"{timestamp}\n", "memory_timestamp")
+                
+                # Display tags
+                tags = memory.get('context_tags', [])
+                if tags:
+                    scroll_widget.insert(tk.END, f"Tags: ", "memory_header")
+                    scroll_widget.insert(tk.END, f"{', '.join(tags)}\n", "memory_tags")
+                
+                # Display summary
+                summary = memory.get('conversation_summary', 'No summary')
+                scroll_widget.insert(tk.END, f"{summary}\n", "memory_content")
+                
+            else:  # dreaming
+                # Display insight_type in accent color
+                insight_type = memory.get('insight_type', 'Unknown')
+                scroll_widget.insert(tk.END, f"Insight Type: ", "memory_header")
+                scroll_widget.insert(tk.END, f"{insight_type}\n", "memory_category")
+                
+                # Display source if available
+                source = memory.get('source', 'unknown')
+                if source != 'unknown':
+                    scroll_widget.insert(tk.END, f"Source: ", "memory_header")
+                    scroll_widget.insert(tk.END, f"{source.capitalize()}\n", "memory_tags")
+                
+                # Display content
+                content = memory.get('content', 'No content')
+                scroll_widget.insert(tk.END, f"{content}\n", "memory_content")
+            
+            # Create edit button frame
+            button_frame = tk.Frame(scroll_widget, bg=self.colors['bg_medium'])
+            
+            # Add edit button - fixed to pass only the index to the callback
+            edit_button = tk.Button(
+                button_frame,
+                text=f"Edit",
+                font=(self.fonts['heading'], 8),
+                bg=self.colors['accent_dim'],
+                fg=self.colors['text_primary'],
+                padx=5,
+                pady=2,
+                relief='flat',
+                command=lambda idx=i: edit_callback(idx)
+            )
+            edit_button.pack(side='left', padx=2)
+            
+            # Add delete button
+            delete_button = tk.Button(
+                button_frame,
+                text=f"Delete",
+                font=(self.fonts['heading'], 8),
+                bg=self.colors['error'],
+                fg=self.colors['text_primary'],
+                padx=5,
+                pady=2,
+                relief='flat',
+                command=lambda idx=i: self._delete_memory(memory_type, idx, scroll_widget, edit_callback)
+            )
+            delete_button.pack(side='left', padx=2)
+            
+            # Insert button frame
+            scroll_widget.window_create(tk.END, window=button_frame)
+            scroll_widget.insert(tk.END, "\n\n", "memory_separator")
         
-        if hasattr(self, 'input_glow'):
-            for glow, radius in self.input_glow:
-                new_radius = radius * (1 + pulse * 0.2)
-                color = self._adjust_color_brightness(
-                    self.colors['accent'], 
-                    0.05 + pulse * 0.08
-                )
-                self.input_radial_canvas.itemconfig(glow, fill=color)
-        
-        self.root.after(50, self._animate_input_glow)
+        scroll_widget.config(state=tk.DISABLED)
     
-    def _animate_separator(self):
-        """Animate the sidebar separator with flowing light"""
-        width = self.separator_canvas.winfo_width() or 250
-        self.separator_canvas.delete('flow')
+    def _filter_memories(self, scroll_widget, memory_type, filter_text):
+        """Filter memories based on search text"""
+        self._populate_memory_panel(scroll_widget, memory_type, 
+            lambda idx: self._edit_memory(memory_type, idx), filter_text)
+            
+    def _edit_memory(self, memory_type, index):
+        """Edit a memory"""
+        try:
+            if memory_type in self.memories and index < len(self.memories[memory_type]):
+                memory = self.memories[memory_type][index]
+                # Create a dialog to edit the memory
+                print(f"Opening edit dialog for {memory_type} memory at index {index}")
+                EditMemoryDialog(self.root, memory, 
+                    lambda updated: self._update_memory(memory_type, index, updated))
+            else:
+                print(f"Invalid memory: {memory_type} at index {index}")
+                self.status_bar.config(text=f"Error: Invalid memory reference")
+                self.root.after(3000, self._update_memory_stats)
+        except Exception as e:
+            print(f"Error opening memory editor: {e}")
+            self.status_bar.config(text=f"Error opening memory editor: {str(e)}")
+            self.root.after(3000, self._update_memory_stats)
+    
+    def _delete_memory(self, memory_type, index, scroll_widget, edit_callback):
+        """Delete a memory after confirmation"""
+        if memory_type not in self.memories or index >= len(self.memories[memory_type]):
+            return
+            
+        memory = self.memories[memory_type][index]
         
-        # Create flowing light effect
-        t = time.time() * 100
-        x = (t % width)
+        # Format memory preview for confirmation
+        preview = ""
+        if memory_type == 'semantic':
+            preview = memory.get('category', 'Unknown')
+        elif memory_type == 'episodic':
+            preview = memory.get('memory_timestamp', 'Unknown')
+        else:  # dreaming
+            # Check for insight_type with fallback to category/about
+            preview = memory.get('insight_type', memory.get('category', memory.get('about', 'Unknown')))
+            
+        # Show confirmation dialog
+        if messagebox.askyesno("Confirm Delete", 
+            f"Are you sure you want to delete this {memory_type} memory?\n\n{preview}"):
+            # Remove memory
+            del self.memories[memory_type][index]
+            
+            # Save changes
+            self._save_memories(memory_type)
+            
+            # Repopulate panel
+            self._populate_memory_panel(scroll_widget, memory_type, edit_callback)
+    
+    def _add_memory_control_buttons(self):
+        """Add control buttons for each memory panel"""
         
-        # Draw gradient pulse along separator
-        for i in range(20):
-            pos = (x - i * 4) % width
-            alpha = max(0, 0.9 - (i * 0.05))
-            color = self._adjust_color_brightness(self.colors['accent'], alpha)
-            self.separator_canvas.create_line(
-                pos, 0, pos + 10, 0,
-                fill=color,
-                width=2,
-                tags='flow'
+        # Semantic memory controls
+        semantic_controls = tk.Frame(self.semantic_frame, bg=self.colors['bg_medium'])
+        semantic_controls.pack(fill='x', padx=5, pady=5)
+        
+        # Add semantic memory button
+        add_semantic_btn = tk.Button(
+            semantic_controls,
+            text="Add Semantic Memory",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['accent_dim'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._create_new_memory('semantic')
+        )
+        add_semantic_btn.pack(side='left', padx=5)
+        
+        # Import semantic memories button
+        import_semantic_btn = tk.Button(
+            semantic_controls,
+            text="Import",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['bg_light'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._import_memories('semantic')
+        )
+        import_semantic_btn.pack(side='left', padx=5)
+        
+        # Export semantic memories button
+        export_semantic_btn = tk.Button(
+            semantic_controls,
+            text="Export",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['bg_light'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._export_memories('semantic')
+        )
+        export_semantic_btn.pack(side='left', padx=5)
+        
+        # Episodic memory controls
+        episodic_controls = tk.Frame(self.episodic_frame, bg=self.colors['bg_medium'])
+        episodic_controls.pack(fill='x', padx=5, pady=5)
+        
+        # Add episodic memory button
+        add_episodic_btn = tk.Button(
+            episodic_controls,
+            text="Add Episodic Memory",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['accent_dim'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._create_new_memory('episodic')
+        )
+        add_episodic_btn.pack(side='left', padx=5)
+        
+        # Import episodic memories button
+        import_episodic_btn = tk.Button(
+            episodic_controls,
+            text="Import",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['bg_light'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._import_memories('episodic')
+        )
+        import_episodic_btn.pack(side='left', padx=5)
+        
+        # Export episodic memories button
+        export_episodic_btn = tk.Button(
+            episodic_controls,
+            text="Export",
+            font=(self.fonts['heading'], 10),
+            bg=self.colors['bg_light'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            padx=10,
+            pady=5,
+            command=lambda: self._export_memories('episodic')
+        )
+        export_episodic_btn.pack(side='left', padx=5)
+        
+        # Dreams memory controls
+        dreaming_controls = tk.Frame(self.dreaming_frame, bg=self.colors['bg_medium'])
+        dreaming_controls.pack(fill='x', padx=5, pady=5)
+        
+        # New dream button
+        new_dream_btn = tk.Button(
+            dreaming_controls, 
+            text="New Dream", 
+            font=(self.fonts['body'], 9),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            command=lambda: self._create_new_memory('dreaming')
+        )
+        new_dream_btn.pack(side='left', padx=5)
+        
+        # Import dreams memories button
+        import_dreaming_btn = tk.Button(
+            dreaming_controls, 
+            text="Import Dreams", 
+            font=(self.fonts['body'], 9),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            command=lambda: self._import_memories('dreaming')
+        )
+        import_dreaming_btn.pack(side='left', padx=5)
+        
+        # Export dreams memories button
+        export_dreaming_btn = tk.Button(
+            dreaming_controls, 
+            text="Export Dreams", 
+            font=(self.fonts['body'], 9),
+            bg=self.colors['bg_medium'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+            command=lambda: self._export_memories('dreaming')
+        )
+        export_dreaming_btn.pack(side='left', padx=5)
+    
+    def _create_new_memory(self, memory_type):
+        """Create a new memory of specified type"""
+        try:
+            if memory_type == 'semantic':
+                # Create new semantic memory
+                new_memory = {"category": "", "content": ""}
+            elif memory_type == 'episodic':
+                # Create new episodic memory with current timestamp
+                from datetime import datetime
+                new_memory = {
+                    "memory_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "context_tags": [],
+                    "conversation_summary": "",
+                    "what_worked": "",
+                    "what_to_avoid": "",
+                    "what_you_learned": ""
+                }
+            else:  # dreaming
+                # Create new dream memory with manual source
+                new_memory = {
+                    "insight_type": "", 
+                    "content": "",
+                    "source": "manual"  # Indicate this was manually created
+                }
+            
+            # Open edit dialog
+            EditMemoryDialog(
+                self.root, 
+                new_memory, 
+                lambda updated: self._add_memory(memory_type, updated)
             )
         
-        self.root.after(50, self._animate_separator)
+        except Exception as e:
+            print(f"Error creating new memory: {e}")
+            self.status_bar.config(text=f"Error creating new memory: {str(e)}")
+            self.root.after(3000, self._update_memory_stats)
+
+    def _add_memory(self, memory_type, memory):
+        """Add a new memory to the specified type"""
+        try:
+            # Validate memory structure
+            if not self._validate_memory_structure(memory, memory_type):
+                print(f"Invalid {memory_type} memory structure")
+                self.status_bar.config(text=f"Error: Invalid {memory_type} memory structure")
+                self.root.after(3000, self._update_memory_stats)
+                return False
+            
+            # Add to memory list
+            self.memories[memory_type].append(memory)
+            
+            # Save to file
+            self._save_memories(memory_type)
+            
+            # Update display
+            if memory_type == 'semantic' and hasattr(self, 'semantic_scroll'):
+                self._populate_memory_panel(
+                    self.semantic_scroll, 
+                    'semantic', 
+                    lambda idx: self._edit_memory('semantic', idx)
+                )
+            elif memory_type == 'episodic' and hasattr(self, 'episodic_scroll'):
+                self._populate_memory_panel(
+                    self.episodic_scroll, 
+                    'episodic', 
+                    lambda idx: self._edit_memory('episodic', idx)
+                )
+            elif memory_type == 'dreaming' and hasattr(self, 'dreaming_scroll'):
+                self._populate_memory_panel(
+                    self.dreaming_scroll, 
+                    'dreaming', 
+                    lambda idx: self._edit_memory('dreaming', idx)
+                )
+            return True
+            
+        except Exception as e:
+            print(f"Error adding memory: {e}")
+            self.status_bar.config(text=f"Error adding memory: {str(e)}")
+            self.root.after(3000, self._update_memory_stats)
+            return False
+
+    def _draw_neural_network(self, canvas):
+        """This method is no longer used - replaced with memory access"""
+        pass
 
     def _on_send(self, event=None, preset_message=None):
         message = preset_message if preset_message else self.input_field.get().strip()
         if message:
-            self.status_bar.config(text="Processing...")
+            self.status_bar.config(text="PROCESSING QUERY...")
             self.input_field.configure(state='disabled')
             self.send_button.configure(state='disabled')
+            
+            # Start thinking indicator
+            self._start_thinking_indicator()
             
             self.display_message(message, "user")
             self.conversation_history.append({
@@ -1011,6 +1676,45 @@ class ChatUI:
                 daemon=True
             ).start()
     
+    def _start_thinking_indicator(self):
+        """Start an elegant thinking indicator animation"""
+        canvas = self.thinking_indicator_canvas
+        canvas.delete("thinking")
+        
+        width = canvas.winfo_width() or 800
+        
+        # Create initial indicator
+        self.thinking_indicator = canvas.create_rectangle(
+            0, 0, 0, 3,
+            fill=self.colors['stark_blue'],
+            tags="thinking"
+        )
+        
+        # Animate the indicator
+        def animate_indicator(step=0):
+            if not hasattr(self, 'thinking_indicator') or step >= 100:
+                return
+                
+            # Calculate width based on step
+            indicator_width = (step / 100) * width
+            
+            # Update indicator width
+            canvas.coords(
+                self.thinking_indicator,
+                0, 0, indicator_width, 3
+            )
+            
+            # Continue animation
+            self.root.after(10, lambda: animate_indicator(step + 1))
+            
+        # Start animation
+        animate_indicator()
+    
+    def _stop_thinking_indicator(self):
+        """Stop thinking indicator with fade out"""
+        if hasattr(self, 'thinking_indicator_canvas'):
+            self.thinking_indicator_canvas.delete("thinking")
+    
     def _process_message(self, message):
         try:
             response = self.chat_callback(message)
@@ -1020,86 +1724,138 @@ class ChatUI:
                 "content": response,
                 "timestamp": datetime.now().isoformat()
             })
-            self.status_bar.config(text="Ready")
+            self.status_bar.config(text="READY")
         except Exception as e:
-            self.msg_queue.put(("error", f"An error occurred: {str(e)}"))
-            self.status_bar.config(text="Error occurred")
+            self.msg_queue.put(("error", f"System Error: {str(e)}"))
+            self.status_bar.config(text="ERROR DETECTED")
         finally:
             self.root.after(0, lambda: self.input_field.configure(state='normal'))
             self.root.after(0, lambda: self.send_button.configure(state='normal'))
             self.root.after(0, lambda: self.input_field.focus_set())
+            self.root.after(0, self._stop_thinking_indicator)
     
     def _clear_chat(self, event=None):
-        if messagebox.askyesno("Clear Chat", "Are you sure you want to clear the chat?"):
+        if messagebox.askyesno("Clear Conversation", "Are you sure you want to clear the conversation history?"):
             self.chat_display.delete(1.0, tk.END)
             self.conversation_history = []
-            self.status_bar.config(text="Chat cleared")
+            self.status_bar.config(text="CONVERSATION CLEARED")
     
     def display_message(self, message, sender):
-        """Display a message with typing animation effect and proper prefixing"""
+        """Display a message with clean, minimalist styling"""
+        # Add spacing between messages
         self.chat_display.insert(tk.END, "\n\n")
         
+        # Create timestamp
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Configure the message prefix based on sender
         if sender == "user":
-            prefix = "Ian: "
+            prefix = f"[{timestamp}] You » "
+            prefix_tag = "user_prefix"
+            msg_tag = "user_message"
+            self.chat_display.tag_config(
+                prefix_tag,
+                foreground=self.colors['stark_blue'],
+                font=(self.fonts['heading'], 11, "bold")
+            )
+            self.chat_display.tag_config(
+                msg_tag,
+                foreground=self.colors['text_primary'],
+                font=(self.fonts['heading'], 11)
+            )
         elif sender == "error":
-            prefix = "Error: "
+            prefix = f"[{timestamp}] SYSTEM ERROR » "
+            prefix_tag = "error_prefix"
+            msg_tag = "error_message"
+            self.chat_display.tag_config(
+                prefix_tag,
+                foreground=self.colors['error'],
+                font=(self.fonts['heading'], 11, "bold")
+            )
+            self.chat_display.tag_config(
+                msg_tag,
+                foreground=self.colors['error'],
+                font=(self.fonts['mono'], 11)
+            )
         else:
-            prefix = "F.R.E.D.: "
+            prefix = f"[{timestamp}] FRED » "
+            prefix_tag = "fred_prefix"
+            msg_tag = "fred_message"
+            self.chat_display.tag_config(
+                prefix_tag,
+                foreground=self.colors['stark_blue'],
+                font=(self.fonts['heading'], 11, "bold")
+            )
+            self.chat_display.tag_config(
+                msg_tag,
+                foreground=self.colors['hologram'],
+                font=(self.fonts['heading'], 11)
+            )
         
-        self.chat_display.insert(tk.END, prefix, f"prefix_{sender}")
-        self.chat_display.tag_config(
-            f"prefix_{sender}",
-            foreground='#00bfff',
-            font=("Rajdhani", 11, "bold")
-        )
+        # Insert the prefix with appropriate styling
+        self.chat_display.insert(tk.END, prefix, prefix_tag)
         
-        if sender == "assistant":
-            self._start_thinking_animation()
-        
+        # Insert message with elegant typing effect
         def type_message(msg, index=0):
             if index < len(msg):
-                self.chat_display.insert(tk.END, msg[index], f"message_{sender}")
+                # Add a bit of randomness to typing speed for realism
+                typing_delay = 5 if sender == "user" else random.randint(5, 15)
+                
+                # Insert character with appropriate styling
+                self.chat_display.insert(tk.END, msg[index], msg_tag)
                 self.chat_display.see(tk.END)
-                self.root.after(10, type_message, msg, index + 1)
+                
+                # Handle special formatting for code blocks
+                if msg[index:index+3] == "```" and sender == "assistant":
+                    # Format code blocks with distinct styling
+                    code_end = msg.find("```", index+3)
+                    if code_end != -1:
+                        code_block = msg[index:code_end+3]
+                        # Skip ahead after inserting full code block
+                        self.chat_display.insert(tk.END, code_block[1:], "code_block")
+                        self.chat_display.tag_config(
+                            "code_block",
+                            foreground="#a2ffd0",
+                            background=self.colors['bg_dark'],
+                            font=(self.fonts['mono'], 10)
+                        )
+                        self.chat_display.see(tk.END)
+                        index = code_end + 3
+                
+                # Schedule next character
+                self.root.after(typing_delay, type_message, msg, index + 1)
             else:
+                # Message complete, insert newline
                 self.chat_display.insert(tk.END, "\n")
                 self.chat_display.see(tk.END)
-                if sender == "assistant":
-                    self._stop_thinking_animation()
-        
+                
+                # Add a minimal separator
+                self.chat_display.insert(tk.END, "─" * 50, "separator")
         self.chat_display.tag_config(
-            f"message_{sender}",
-            foreground='#00bfff',
-            font=("Rajdhani", 11)
+            "separator",
+                    foreground=self.colors['accent_dim'],
+            font=(self.fonts['mono'], 8)
         )
+        self.chat_display.insert(tk.END, "\n")
         
+        # Handle null messages
         if message is None:
-            message = "Empty message"
+            message = "No response received"
         
+        # Start typing animation
         type_message(message)
     
-    def _update_time(self):
-        """Update time display with digital clock effect and date"""
-        current_time = datetime.now()
+    def _setup_layout(self):
+        """Set up the interface layout"""
+        # Set up container
+        self.container.pack(expand=True, fill='both')
+        self.main_frame.pack(expand=True, fill='both')
+            
+        # Create holographic visualization
+        self._create_holographic_display()
         
-        # Format date
-        date_str = current_time.strftime("%A, %B %d, %Y")
-        self.date_label.config(text=date_str)
-        
-        # Format time with blinking separator for dynamic effect
-        time_str = current_time.strftime("%H:%M:%S")
-        separator = ":" if time.time() % 1 < 0.5 else " "
-        formatted_time = time_str.replace(":", separator)
-        self.time_label.config(text=formatted_time)
-        
-        # Pulse the status circle
-        t = time.time() * 2
-        pulse = abs(math.sin(t)) * 0.3 + 0.7
-        color = self._adjust_color_brightness(self.colors['accent'], pulse)
-        if hasattr(self, 'status_circle'):
-            self.status_canvas.itemconfig(self.status_circle, fill=color)
-        
-        self.root.after(500, self._update_time)
+        # Set focus to input field
+        self.input_field.focus_set()
     
     def _start_msg_checker(self):
         try:
@@ -1110,368 +1866,683 @@ class ChatUI:
             self.root.after(100, self._start_msg_checker)
     
     def run(self):
-        self.root.attributes('-alpha', 0.98)
+        # Apply window opacity with platform-specific handling
+        try:
+            self.root.attributes('-alpha', 0.95)
+        except Exception as e:
+            print(f"Note: Transparency not fully supported on this system. {e}")
+            
+        # Center window on screen
         self.root.update_idletasks()
         width = self.root.winfo_width()
         height = self.root.winfo_height()
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f'+{x}+{y}')
+        
+        # Display startup message
+        self.display_message("F.R.E.D. Neural Interface initialized. At your service, sir.", "assistant")
+        
         self.root.mainloop()
 
-    def _create_tech_pattern(self):
-        """Create a futuristic tech overlay pattern"""
-        width = self.overlay_canvas.winfo_width()
-        height = self.overlay_canvas.winfo_height()
-        for x in range(0, width, 30):
-            self.overlay_canvas.create_line(x, 0, x, height, fill='#00bfff', width=1, stipple='gray50')
-        for y in range(0, height, 30):
-            self.overlay_canvas.create_line(0, y, width, y, fill='#00bfff', width=1, stipple='gray50')
+    def _update_memory(self, memory_type, index, updated_memory):
+        """Update an existing memory with validation"""
+        if memory_type in self.memories and index < len(self.memories[memory_type]):
+            # Validate the updated memory
+            if self._validate_memory_structure(updated_memory, memory_type):
+                # Update the memory
+                self.memories[memory_type][index] = updated_memory
+                
+                # Refresh the display
+                try:
+                    if hasattr(self, 'memory_notebook'):
+                        # Get current tab
+                        current_tab = self.memory_notebook.index(self.memory_notebook.select())
+                        
+                        # Find the appropriate memory panel
+                        memory_panel = None
+                        if memory_type == 'semantic' and hasattr(self, 'semantic_frame'):
+                            for widget in self.semantic_frame.winfo_children():
+                                if isinstance(widget, scrolledtext.ScrolledText):
+                                    memory_panel = widget
+                                    break
+                        elif memory_type == 'episodic' and hasattr(self, 'episodic_frame'):
+                            for widget in self.episodic_frame.winfo_children():
+                                if isinstance(widget, scrolledtext.ScrolledText):
+                                    memory_panel = widget
+                                    break
+                        elif memory_type == 'dreaming' and hasattr(self, 'dreaming_frame'):
+                            for widget in self.dreaming_frame.winfo_children():
+                                if isinstance(widget, scrolledtext.ScrolledText):
+                                    memory_panel = widget
+                                    break
+                        
+                        # Repopulate the specific memory panel if found
+                        if memory_panel:
+                            self._populate_memory_panel(
+                                memory_panel, 
+                                memory_type, 
+                                lambda idx, t=memory_type: self._edit_memory(t, idx)
+                            )
+                        else:
+                            # Fallback: reload all memories
+                            self._load_memories()
+                            # Switch back to the previously selected tab
+                            self.memory_notebook.select(current_tab)
+                        
+                        # Update memory stats
+                        self._update_memory_stats()
+                        
+                        # Show success message
+                        self.status_bar.config(text=f"{memory_type.capitalize()} memory updated")
+                        self.root.after(3000, self._update_memory_stats)
+                except Exception as e:
+                    print(f"Error refreshing memory display: {e}")
+                    # Fallback: reload all memories
+                    self._load_memories()
+            else:
+                messagebox.showerror("Validation Error", 
+                    f"Invalid memory structure for {memory_type} memory")
 
-    def _start_thinking_animation(self):
-        """Create particle effect animation while F.R.E.D. is 'thinking'"""
-        if not self.particle_canvas:
+    def _start_arc_pulse(self):
+        """Create pulsing effect for the arc reactor"""
+        if not hasattr(self, 'arc_reactor_canvas'):
             return
-        self.particle_canvas.place(relx=0.5, rely=0.1, anchor='n')
-        self.thinking_active = True
-        for _ in range(10):
-            particle = {
-                'x': self.particle_canvas.winfo_width() / 2,
-                'y': self.particle_canvas.winfo_height() / 2,
-                'dx': (random.random() - 0.5) * 4,
-                'dy': (random.random() - 0.5) * 4,
-                'size': random.randint(2, 5),
-                'id': None
-            }
-            self.thinking_particles.append(particle)
-        self._animate_thinking_particles()
-
-    def _animate_thinking_particles(self):
-        """Animate the thinking particles on the canvas"""
-        if not hasattr(self, 'thinking_active') or not self.thinking_active:
-            return
-        self.particle_canvas.delete('particle')
-        for particle in self.thinking_particles:
-            particle['x'] += particle['dx']
-            particle['y'] += particle['dy']
-            if particle['x'] < 0 or particle['x'] > self.particle_canvas.winfo_width():
-                particle['dx'] *= -1
-            if particle['y'] < 0 or particle['y'] > self.particle_canvas.winfo_height():
-                particle['dy'] *= -1
-            size = particle['size']
-            self.particle_canvas.create_oval(
-                particle['x'] - size,
-                particle['y'] - size,
-                particle['x'] + size,
-                particle['y'] + size,
-                fill='#00bfff',
-                outline='',
-                tags='particle'
-            )
-        self.root.after(50, self._animate_thinking_particles)
-
-    def _stop_thinking_animation(self):
-        """Stop the thinking animation and clear particles"""
-        self.thinking_active = False
-        if self.particle_canvas:
-            self.particle_canvas.place_forget()
-            self.particle_canvas.delete('particle')
-        self.thinking_particles.clear()
-
-    def _pulse_voice_indicator(self, level):
-        """Pulse the voice indicator based on audio level"""
-        if not hasattr(self, 'voice_indicator'):
-            return
-        scale = 1 + (level * 0.5)
-        self.voice_indicator.scale('voice_ring', 10, 10, scale, scale)
-        color = self._adjust_color_brightness('#00bfff', 0.5 + level)
-        self.voice_indicator.itemconfig('voice_ring', outline=color)
-
-    def _create_neural_network(self):
-        """Create a dynamic neural network visualization"""
-        self.nodes = []
-        self.connections = []
-        for i in range(10):
-            x = random.randint(20, 130)
-            y = random.randint(20, 130)
-            node = {
-                'x': x,
-                'y': y,
-                'activation': random.random(),
-                'id': self.neural_canvas.create_oval(
-                    x-3, y-3, x+3, y+3,
-                    fill='#00bfff',
-                    outline='#00bfff'
+            
+        def pulse_animation(step=0):
+            if not hasattr(self, 'arc_reactor_canvas') or not self.arc_reactor_canvas.winfo_exists():
+                return
+                
+            try:
+                # Get current dimensions
+                width = 180
+                height = 180
+                center_x = width / 2
+                center_y = height / 2
+                
+                # Calculate pulse effect
+                pulse_factor = 0.8 + 0.2 * math.sin(step * 0.1)  # Smooth sine wave
+                
+                # Update outer ring
+                outer_radius = 75 * pulse_factor
+                self.arc_reactor_canvas.coords(
+                    "reactor_ring",
+                    center_x - outer_radius, center_y - outer_radius,
+                    center_x + outer_radius, center_y + outer_radius
                 )
-            }
-            self.nodes.append(node)
-        for i in range(len(self.nodes)):
-            for j in range(i + 1, len(self.nodes)):
-                if random.random() < 0.3:
-                    conn = self.neural_canvas.create_line(
-                        self.nodes[i]['x'], self.nodes[i]['y'],
-                        self.nodes[j]['x'], self.nodes[j]['y'],
-                        fill='#00bfff',
-                        width=1,
-                        dash=(2, 4)
-                    )
-                    self.connections.append({
-                        'from': i,
-                        'to': j,
-                        'id': conn,
-                        'activity': random.random()
-                    })
-        self._animate_neural_network()
-
-    def _animate_neural_network(self):
-        """Animate neural network nodes and connections with a neon glow effect"""
-        if not hasattr(self, 'nodes'):
-            return
-        for node in self.nodes:
-            node['activation'] = min(1.0, max(0.2, node['activation'] + random.uniform(-0.1, 0.1)))
-            color = self._adjust_color_brightness('#00bfff', node['activation'])
-            self.neural_canvas.itemconfig(node['id'], fill=color, outline=color)
-        for conn in self.connections:
-            conn['activity'] = min(1.0, max(0.1, conn['activity'] + random.uniform(-0.1, 0.1)))
-            color = self._adjust_color_brightness('#00bfff', conn['activity'])
-            self.neural_canvas.itemconfig(conn['id'], fill=color)
-        self.root.after(100, self._animate_neural_network)
-
-    def _create_env_display(self):
-        """Create an environment analysis display with neon bars"""
-        self.env_metrics = {
-            'processing_load': 0.0,
-            'response_time': 0.0,
-            'creativity_index': 0.0
-        }
-        y_pos = 5
-        self.env_indicators = {}
-        for metric in self.env_metrics:
-            label = ttk.Label(
-                self.env_frame,
-                text=metric.replace('_', ' ').title(),
-                foreground='#00bfff',
-                background='#0d1a2a',
-                font=('Rajdhani', 9)
-            )
-            label.pack(anchor='w', padx=5)
-            bar = self.env_canvas.create_rectangle(
-                5, y_pos,
-                105, y_pos + 4,
-                fill='#00bfff',
-                width=0
-            )
-            self.env_indicators[metric] = bar
-            y_pos += 10
-        self._update_env_metrics()
-
-    def _update_env_metrics(self):
-        """Update environment analysis metrics with smooth transitions"""
-        for metric in self.env_metrics:
-            target = random.uniform(0.3, 0.9)
-            current = self.env_metrics[metric]
-            self.env_metrics[metric] += (target - current) * 0.1
-            bar = self.env_indicators[metric]
-            width = self.env_metrics[metric] * 100
-            self.env_canvas.coords(bar, 5, self.env_canvas.coords(bar)[1], 5 + width, self.env_canvas.coords(bar)[3])
-            color = self._adjust_color_brightness('#00bfff', 0.5 + self.env_metrics[metric] * 0.5)
-            self.env_canvas.itemconfig(bar, fill=color)
-        self.root.after(200, self._update_env_metrics)
-
-    def _create_hex_grid(self):
-        """Create an animated hexagonal grid background for a futuristic feel"""
-        self.hex_cells = []
-        size = 20
-        for row in range(0, self.chat_frame.winfo_height(), size * 2):
-            for col in range(0, 100, size * 2):
-                points = self._calculate_hex_points(col, row, size)
-                hex_cell = self.hex_canvas.create_polygon(
-                    points,
-                    fill='',
-                    outline='#00bfff',
-                    width=1,
-                    stipple='gray25'
+                
+                # Update core glow
+                core_radius = 25 * (1 + 0.1 * math.sin(step * 0.2))  # Faster pulse for core
+                self.arc_reactor_canvas.coords(
+                    "reactor_core",
+                    center_x - core_radius, center_y - core_radius,
+                    center_x + core_radius, center_y + core_radius
                 )
-                self.hex_cells.append({
-                    'id': hex_cell,
-                    'pulse': random.random() * math.pi
-                })
-        self._animate_hex_grid()
+                
+                # Update ambient glow
+                glow_radius = 85 * (1 + 0.05 * math.sin(step * 0.05))  # Slower pulse for glow
+                self.arc_reactor_canvas.coords(
+                    "reactor_glow",
+                    center_x - glow_radius, center_y - glow_radius,
+                    center_x + glow_radius, center_y + glow_radius
+                )
+                
+                # Continue animation
+                self.root.after(50, lambda: pulse_animation(step + 1))
+                
+            except Exception as e:
+                print(f"Error in arc pulse animation: {e}")
+                self.root.after(1000, self._start_arc_pulse)
+        
+        # Start pulse animation
+        try:
+            pulse_animation()
+        except Exception as e:
+            print(f"Failed to start arc pulse: {e}")
 
-    def _calculate_hex_points(self, x, y, size):
-        points = []
-        for i in range(6):
-            angle = i * math.pi / 3
-            points.extend([x + size * math.cos(angle), y + size * math.sin(angle)])
-        return points
-
-    def _animate_hex_grid(self):
-        """Animate hexagonal grid lines with a pulsing neon glow"""
-        t = time.time()
-        for cell in self.hex_cells:
-            cell['pulse'] += 0.05
-            opacity = abs(math.sin(cell['pulse'])) * 0.5 + 0.2
-            color = self._adjust_color_brightness('#00bfff', opacity)
-            self.hex_canvas.itemconfig(cell['id'], outline=color)
-        self.root.after(50, self._animate_hex_grid)
-
-    def _create_data_stream(self):
-        """Create falling data stream effect to simulate high-tech information flow"""
-        self.data_particles = []
-        for _ in range(20):
-            particle = {
-                'x': random.randint(5, 25),
-                'y': random.randint(0, self.chat_frame.winfo_height()),
-                'speed': random.uniform(2, 5),
-                'length': random.randint(10, 30),
-                'opacity': random.random()
-            }
-            self.data_particles.append(particle)
-        self._animate_data_stream()
-
-    def _animate_data_stream(self):
-        """Animate falling data stream particles"""
-        self.stream_canvas.delete('stream')
-        height = self.chat_frame.winfo_height()
-        for particle in self.data_particles:
-            particle['y'] += particle['speed']
-            if particle['y'] > height:
-                particle['y'] = -particle['length']
-                particle['x'] = random.randint(5, 25)
-                particle['opacity'] = random.random()
-            color = self._adjust_color_brightness('#00bfff', particle['opacity'])
-            self.stream_canvas.create_line(
-                particle['x'], particle['y'],
-                particle['x'], particle['y'] + particle['length'],
-                fill=color,
-                width=1,
-                tags='stream'
+    def _create_radial_menu(self):
+        """Create the radial menu buttons for memory access"""
+        # Create buttons in a circular layout
+        buttons = [
+            ("Chat", lambda: self.memory_notebook.select(0)),
+            ("Semantic", lambda: self.memory_notebook.select(0)),
+            ("Episodic", lambda: self.memory_notebook.select(1)),
+            ("Dreams", lambda: self.memory_notebook.select(2))
+        ]
+        
+        # Calculate positions for buttons
+        center_x = 90  # Half of arc_reactor_canvas width
+        center_y = 90  # Half of arc_reactor_canvas height
+        radius = 40   # Distance from center
+        
+        # Create buttons in a circular layout
+        for i, (text, command) in enumerate(buttons):
+            angle = (2 * math.pi * i) / len(buttons)
+            x = center_x + radius * math.cos(angle)
+            y = center_y + radius * math.sin(angle)
+            
+            # Create button with hover effect
+            btn = tk.Button(
+                self.arc_reactor_canvas,
+                text=text,
+                font=(self.fonts['heading'], 8),
+                bg=self.colors['bg_medium'],
+                fg=self.colors['text_primary'],
+                activebackground=self.colors['accent'],
+                activeforeground=self.colors['text_primary'],
+                relief='flat',
+                padx=5,
+                pady=2,
+                command=command
             )
-        self.root.after(50, self._animate_data_stream)
+            
+            # Add hover effect
+            def _on_enter(e, b=btn):
+                b.config(bg=self.colors['accent'])
+                
+            def _on_leave(e, b=btn):
+                b.config(bg=self.colors['bg_medium'])
+                
+            btn.bind("<Enter>", _on_enter)
+            btn.bind("<Leave>", _on_leave)
+            
+            # Position button
+            self.arc_reactor_canvas.create_window(x, y, window=btn, anchor='center')
 
-    def _create_frequency_analyzer(self):
-        """Create a frequency analyzer visualization with smooth, dynamic bars"""
-        self.freq_bars = []
-        bar_count = 30
-        bar_width = 3
-        spacing = 2
-        for i in range(bar_count):
-            x = i * (bar_width + spacing) + 5
-            bar = self.freq_canvas.create_line(
-                x, 40, x, 40,
-                fill='#00bfff',
-                width=bar_width
+    def _import_memories(self, memory_type):
+        """Import memories from a JSON or JSONL file"""
+        try:
+            # Ask user for import file
+            file_types = [("JSON files", "*.json"), ("All files", "*.*")]
+            import_file = filedialog.askopenfilename(
+                filetypes=file_types,
+                title=f"Import {memory_type.capitalize()} Memories"
             )
-            self.freq_bars.append({
-                'id': bar,
-                'value': random.random(),
-                'target': random.random()
-            })
-        self._animate_frequency_analyzer()
+            
+            if not import_file:
+                return  # User cancelled
+                
+            # Read the file
+            with open(import_file, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                
+            if not content:
+                messagebox.showinfo("Import", "The selected file is empty")
+                return
+                
+            # Try to parse as JSON array first
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    # It's a JSON array
+                    imported_memories = data
+                else:
+                    # It's a single JSON object
+                    imported_memories = [data]
+            except json.JSONDecodeError:
+                # Try JSONL format (one JSON object per line)
+                imported_memories = []
+                with open(import_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            memory = json.loads(line)
+                            imported_memories.append(memory)
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing line: {e}")
+                            continue
+            
+            if not imported_memories:
+                messagebox.showinfo("Import", "No valid memories found in the selected file")
+                return
+                
+            # Validate memories
+            valid_memories = []
+            for memory in imported_memories:
+                if self._validate_memory_structure(memory, memory_type):
+                    valid_memories.append(memory)
+            
+            if not valid_memories:
+                messagebox.showinfo("Import", 
+                    f"No valid {memory_type} memories found in the selected file")
+                return
+                
+            # Ask user if they want to replace or append
+            if self.memories[memory_type]:
+                replace = messagebox.askyesno(
+                    "Import Options", 
+                    f"Do you want to replace existing {memory_type} memories?\n\n"
+                    "Yes: Replace all existing memories\n"
+                    "No: Append imported memories to existing ones"
+                )
+            else:
+                replace = True
+                
+            # Update memories
+            if replace:
+                self.memories[memory_type] = valid_memories
+            else:
+                self.memories[memory_type].extend(valid_memories)
+                
+            # Save to file
+            self._save_memories(memory_type)
+            
+            # Repopulate memory panel
+            if memory_type == 'semantic' and hasattr(self, 'semantic_scroll'):
+                self._populate_memory_panel(
+                    self.semantic_scroll, 
+                    'semantic', 
+                    lambda idx: self._edit_memory('semantic', idx)
+                )
+            elif memory_type == 'episodic' and hasattr(self, 'episodic_scroll'):
+                self._populate_memory_panel(
+                    self.episodic_scroll, 
+                    'episodic', 
+                    lambda idx: self._edit_memory('episodic', idx)
+                )
+            elif memory_type == 'dreaming' and hasattr(self, 'dreaming_scroll'):
+                self._populate_memory_panel(
+                    self.dreaming_scroll, 
+                    'dreaming', 
+                    lambda idx: self._edit_memory('dreaming', idx)
+                )
+            
+            # Show success message
+            messagebox.showinfo("Import Complete", 
+                f"Successfully imported {len(valid_memories)} {memory_type} memories")
+                
+        except Exception as e:
+            messagebox.showerror("Import Error", f"Failed to import memories: {str(e)}")
 
-    def _animate_frequency_analyzer(self):
-        """Animate frequency analyzer bars with neon gradients"""
-        for bar in self.freq_bars:
-            bar['value'] += (bar['target'] - bar['value']) * 0.2
-            if abs(bar['target'] - bar['value']) < 0.01:
-                bar['target'] = random.random()
-            height = bar['value'] * 35
-            coords = self.freq_canvas.coords(bar['id'])
-            self.freq_canvas.coords(bar['id'], coords[0], 40, coords[0], 40 - height)
-            color = self._adjust_color_brightness('#00bfff', 0.5 + bar['value'] * 0.5)
-            self.freq_canvas.itemconfig(bar['id'], fill=color)
-        self.root.after(50, self._animate_frequency_analyzer)
-
-    def _show_about(self):
-        """Show information about F.R.E.D."""
-        about_text = (
-            "F.R.E.D. - Funny Rude Educated Droid\n\n"
-            "Version 1.0\n"
-            "© 2023 Neural Intelligence Division\n\n"
-            "F.R.E.D. is an advanced artificial intelligence assistant designed to help with a variety of tasks."
-        )
-        messagebox.showinfo("About F.R.E.D.", about_text)
+class EditMemoryDialog:
+    """Dialog for editing memory entries"""
+    def __init__(self, parent, memory, callback):
+        self.memory = memory.copy()  # Create a copy to avoid modifying original until save
+        self.callback = callback
+        self.parent = parent
+        
+        # Create dialog window
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Edit Memory")
+        self.dialog.geometry("650x550")  # Ensure adequate initial size
+        self.dialog.minsize(500, 400)    # Set minimum size to prevent too small dialog
+        self.dialog.resizable(True, True)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # Set dialog styling
+        self.dialog.configure(bg='#1a0438')  # Use medium purple
+        
+        # Add proper window icon
+        try:
+            self.dialog.iconbitmap("assets/fred_icon.ico")
+        except:
+            pass
+            
+        # Make dialog modal
+        self.dialog.focus_set()
+        self.dialog.protocol("WM_DELETE_WINDOW", self._cancel)
+        
+        # Bind escape key to cancel
+        self.dialog.bind("<Escape>", lambda e: self._cancel())
+        # Bind Enter key to save (only if not in a Text widget)
+        self.dialog.bind("<Return>", lambda e: self._save() if e.widget.__class__.__name__ != "Text" else None)
+        
+        # Create form based on memory type
+        self.create_form()
+        
+        # Center the dialog on the parent window
+        self._center_window()
+        
+        # Ensure dialog appears on top
+        self.dialog.lift()
+        self.dialog.focus_force()
+        
+    def _center_window(self):
+        """Center the dialog on the parent window"""
+        self.dialog.update_idletasks()
+        
+        # Get parent and dialog dimensions
+        parent_x = self.parent.winfo_rootx()
+        parent_y = self.parent.winfo_rooty()
+        parent_width = self.parent.winfo_width()
+        parent_height = self.parent.winfo_height()
+        
+        dialog_width = self.dialog.winfo_width()
+        dialog_height = self.dialog.winfo_height()
+        
+        # Calculate position
+        x = parent_x + (parent_width - dialog_width) // 2
+        y = parent_y + (parent_height - dialog_height) // 2
+        
+        # Set position
+        self.dialog.geometry(f"+{x}+{y}")
     
-    def _show_commands(self):
-        """Show available F.R.E.D. commands"""
-        commands_text = (
-            "Available Commands:\n\n"
-            "• 'scan systems' - Check system status\n"
-            "• 'quick learn [topic]' - Search for information\n"
-            "• 'news [topic]' - Get latest news\n"
-            "• 'create note [title]' - Create a new note\n"
-            "• 'deep research [topic]' - Perform in-depth research\n"
-            "• 'goodbye' - Exit conversation"
+    def create_form(self):
+        """Create form fields based on memory structure"""
+        # Main frame
+        main_frame = tk.Frame(self.dialog, bg='#1a0438', padx=15, pady=15)
+        main_frame.pack(fill='both', expand=True)
+        
+        # Title
+        memory_type = "Unknown"
+        if "category" in self.memory and "content" in self.memory and "memory_timestamp" not in self.memory:
+            # This is a semantic memory
+            memory_type = "Semantic"
+        elif "memory_timestamp" in self.memory:
+            # This is an episodic memory
+            memory_type = "Episodic"
+        else:
+            # This is an assumption memory
+            memory_type = "Assumption"
+            
+        title = tk.Label(
+            main_frame,
+            text=f"Edit {memory_type} Memory",
+            font=("Rajdhani", 18, "bold"),
+            fg='#c17bff',  # bright purple
+            bg='#1a0438'
         )
-        messagebox.showinfo("F.R.E.D. Commands", commands_text)
-
-    def _start_animations(self):
-        """Start all UI animations"""
-        self._animate_enhanced_reactor()
-        self._animate_hex_grid()
-        self._animate_data_stream()
-        self._animate_input_glow()
-        self._animate_separator()
-
-    def _animate_system_indicators(self):
-        """Animate system status indicators for a dynamic dashboard effect"""
-        if hasattr(self, 'system_indicators'):
-            # Randomly change one indicator occasionally
-            if random.random() < 0.05:  # 5% chance each cycle
-                system = random.choice(list(self.system_indicators.keys()))
-                status = random.choice([
-                    self.colors['success'],  # Online
-                    self.colors['warning'],  # Warning
-                    self.colors['highlight']  # Alert
-                ])
-                self.systems_canvas.itemconfig(self.system_indicators[system], fill=status)
+        title.pack(pady=(0, 15))
         
-        # Run this animation less frequently
-        self.root.after(1000, self._animate_system_indicators)
-
-    def _show_settings(self):
-        """Show settings dialog"""
-        settings_window = tk.Toplevel(self.root)
-        settings_window.title("F.R.E.D. Settings")
-        settings_window.geometry("400x300")
-        settings_window.configure(bg=self.colors['bg_medium'])
+        # Create scrollable frame for form fields
+        canvas_frame = tk.Frame(main_frame, bg='#1a0438')
+        canvas_frame.pack(fill='both', expand=True)
         
-        # Center the window
-        settings_window.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - settings_window.winfo_width()) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - settings_window.winfo_height()) // 2
-        settings_window.geometry(f"+{x}+{y}")
+        canvas = tk.Canvas(canvas_frame, bg='#1a0438', highlightthickness=0)
+        scrollbar = tk.Scrollbar(canvas_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg='#1a0438')
         
-        # Simple settings content
-        title_label = ttk.Label(
-            settings_window,
-            text="F.R.E.D. CONFIGURATION",
-            style='Title.TLabel',
-            font=('Rajdhani', 16, 'bold')
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
-        title_label.pack(pady=20)
         
-        # Settings options would go here
-        ttk.Label(
-            settings_window,
-            text="Settings functionality will be implemented in a future update.",
-            style='Neural.TLabel'
-        ).pack(pady=40)
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         
-        # Close button
-        close_btn = tk.Button(
-            settings_window,
-            text="CLOSE",
-            font=('Rajdhani', 11, 'bold'),
-            bg=self.colors['bg_medium'],
-            fg=self.colors['accent_bright'],
-            activebackground=self.colors['bg_light'],
-            activeforeground='#ffffff',
-            relief='flat',
-            padx=15,
+        # Configure canvas to expand with frame
+        def _configure_canvas(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas.bind("<Configure>", _configure_canvas)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Store canvas reference for cleanup
+        self.form_canvas = canvas
+        
+        # Position canvas and scrollbar properly
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel event for scrolling with safety check
+        def _on_mousewheel(event):
+            if canvas.winfo_exists():
+                try:
+                    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                except Exception as e:
+                    print(f"Mousewheel error: {e}")
+        
+        # Store the mousewheel function for later unbinding
+        self.mousewheel_func = _on_mousewheel
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Form fields container
+        self.form_fields = {}
+        
+        # Create form fields based on memory type
+        if memory_type == "Semantic":  # Semantic memory
+            self._create_field(scrollable_frame, "category", "Category:", 0)
+            self._create_text_area(scrollable_frame, "content", "Content:", 1)
+        
+        elif memory_type == "Episodic":  # Episodic memory
+            self._create_field(scrollable_frame, "memory_timestamp", "Timestamp:", 0)
+            self._create_field(scrollable_frame, "context_tags", "Tags (comma-separated):", 1)
+            self._create_text_area(scrollable_frame, "conversation_summary", "Summary:", 2)
+            self._create_text_area(scrollable_frame, "what_worked", "What Worked:", 3)
+            self._create_text_area(scrollable_frame, "what_to_avoid", "What to Avoid:", 4)
+            self._create_text_area(scrollable_frame, "what_you_learned", "What You Learned:", 5)
+        
+        else:  # Assumptions memory - handle both "about" and "category" fields
+            field_name = "about" if "about" in self.memory else "category"
+            self._create_field(scrollable_frame, field_name, "Category:", 0)
+            self._create_text_area(scrollable_frame, "content", "Content:", 1)
+        
+        # Ensure scrollable_frame has minimum dimensions
+        scrollable_frame.update_idletasks()
+        min_width = max(500, scrollable_frame.winfo_reqwidth())
+        min_height = max(400, scrollable_frame.winfo_reqheight())
+        canvas.config(width=min_width, height=min_height)
+        
+        # Button frame at the bottom
+        button_frame = tk.Frame(main_frame, bg='#1a0438')
+        button_frame.pack(fill='x', pady=(15, 0))
+        
+        # Save button
+        save_button = tk.Button(
+            button_frame,
+            text="Save",
+            font=("Rajdhani", 12, "bold"),
+            bg='#9d6ad8',  # accent
+            fg='#f5f0ff',  # text primary
+            padx=20,
             pady=5,
-            cursor='hand2',
-            bd=0
+            relief='flat',
+            command=self._save
         )
-        close_btn.pack(pady=20)
-        close_btn.bind("<Button-1>", lambda e: settings_window.destroy())
+        save_button.pack(side='right', padx=5)
+        
+        # Cancel button
+        cancel_button = tk.Button(
+            button_frame,
+            text="Cancel",
+            font=("Rajdhani", 12),
+            bg='#2c0657',  # bg light
+            fg='#f5f0ff',  # text primary
+            padx=20,
+            pady=5,
+            relief='flat',
+            command=self._cancel
+        )
+        cancel_button.pack(side='right', padx=5)
+        
+        # Set initial focus to first field
+        if self.form_fields:
+            first_field = list(self.form_fields.values())[0]
+            first_field.focus_set()
+    
+    def _create_field(self, parent, field_name, label_text, row):
+        """Create a labeled field in the form"""
+        frame = tk.Frame(parent, bg='#1a0438', pady=5)
+        frame.pack(fill='x', pady=5)
+        
+        # Label
+        label = tk.Label(
+            frame,
+            text=label_text,
+            font=("Rajdhani", 12, "bold"),
+            fg='#c8a2ff',  # hologram
+            bg='#1a0438',
+            anchor='w'
+        )
+        label.pack(fill='x')
+        
+        # Entry field
+        entry = tk.Entry(
+            frame,
+            font=("Consolas", 11),
+            bg='#2c0657',  # bg light
+            fg='#f5f0ff',  # text primary
+            insertbackground='#c17bff',  # bright accent
+            relief='flat',
+            bd=0,
+            width=40,  # Ensure minimum width is set
+            highlightthickness=1,  # Add highlight border
+            highlightbackground='#4a1987',  # Dark purple border
+            highlightcolor='#c17bff'  # Bright accent when focused
+        )
+        entry.pack(fill='x', ipady=5, pady=(2, 0))
+        
+        # Pre-fill with existing value
+        if field_name in self.memory:
+            if field_name == "context_tags" and isinstance(self.memory[field_name], list):
+                entry.insert(0, ", ".join(self.memory[field_name]))
+            else:
+                entry.insert(0, str(self.memory[field_name]))
+        
+        # Store reference
+        self.form_fields[field_name] = entry
+    
+    def _create_text_area(self, parent, field_name, label_text, row):
+        """Create a labeled text area in the form"""
+        frame = tk.Frame(parent, bg='#1a0438', pady=5)
+        frame.pack(fill='x', expand=True, pady=5)
+        
+        # Label
+        label = tk.Label(
+            frame,
+            text=label_text,
+            font=("Rajdhani", 12, "bold"),
+            fg='#c8a2ff',  # hologram
+            bg='#1a0438',
+            anchor='w'
+        )
+        label.pack(fill='x')
+        
+        # Text area container for proper sizing
+        text_container = tk.Frame(frame, bg='#2c0657', height=100)
+        text_container.pack(fill='both', expand=True, pady=(2, 0))
+        text_container.pack_propagate(False)  # Prevent container from shrinking
+        
+        # Text area
+        text_area = tk.Text(
+            text_container,
+            font=("Consolas", 11),
+            bg='#2c0657',  # bg light
+            fg='#f5f0ff',  # text primary
+            insertbackground='#c17bff',  # bright accent
+            height=4,
+            relief='flat',
+            bd=0,
+            padx=5,
+            pady=5,
+            wrap='word',
+            highlightthickness=1,  # Add highlight border
+            highlightbackground='#4a1987',  # Dark purple border
+            highlightcolor='#c17bff'  # Bright accent when focused
+        )
+        text_area.pack(fill='both', expand=True)
+        
+        # Add scrollbar
+        scrollbar = tk.Scrollbar(text_container)
+        scrollbar.pack(side='right', fill='y')
+        text_area.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=text_area.yview)
+        
+        # Pre-fill with existing value
+        if field_name in self.memory:
+            text_area.insert("1.0", str(self.memory[field_name]))
+        
+        # Store reference
+        self.form_fields[field_name] = text_area
+    
+    def _cancel(self):
+        """Cancel editing and close the dialog"""
+        # Unbind mousewheel event to prevent callbacks after dialog is destroyed
+        if hasattr(self, 'mousewheel_func'):
+            try:
+                self.dialog.unbind_all("<MouseWheel>")
+            except Exception as e:
+                print(f"Unbind error: {e}")
+        self.dialog.destroy()
+        
+    def _save(self):
+        """Save the edited memory with validation"""
+        try:
+            has_validation_error = False
+            validation_message = ""
+            
+            # Create a new memory object to hold the updated values
+            updated_memory = {}
+            
+            # Determine memory type
+            memory_type = "Unknown"
+            if "category" in self.memory and "content" in self.memory and "memory_timestamp" not in self.memory:
+                memory_type = "Semantic"
+            elif "memory_timestamp" in self.memory:
+                memory_type = "Episodic"
+            else:
+                memory_type = "Assumption"
+            
+            print(f"Saving {memory_type} memory")
+            
+            # Get values from widgets and handle special cases
+            for field_name, widget in self.form_fields.items():
+                if isinstance(widget, tk.Text):
+                    value = widget.get("1.0", "end-1c").strip()  # Get text without trailing newline
+                else:
+                    value = widget.get().strip()
+                
+                print(f"  Field: {field_name} = {value[:30]}{'...' if len(value) > 30 else ''}")
+                
+                # Check if required fields are not empty
+                required_field = False
+                
+                if memory_type == "Semantic" and field_name == "category":
+                    required_field = True
+                elif memory_type == "Episodic" and field_name == "conversation_summary":
+                    required_field = True
+                elif memory_type == "Assumption" and (field_name == "about" or field_name == "category"):
+                    required_field = True
+                elif field_name == "content":
+                    required_field = True
+                
+                if required_field and not value:
+                    has_validation_error = True
+                    validation_message = f"The field '{field_name}' cannot be empty."
+                    widget.focus_set()  # Set focus to the problematic field
+                    break
+                
+                # Handle special fields
+                if field_name == "context_tags" and isinstance(self.memory[field_name], list):
+                    # Convert comma-separated string to list
+                    updated_memory[field_name] = [tag.strip() for tag in value.split(",") if tag.strip()]
+                else:
+                    updated_memory[field_name] = value
+            
+            # If no validation error, copy all fields from original memory that weren't in the form
+            if not has_validation_error:
+                for key, value in self.memory.items():
+                    if key not in updated_memory:
+                        updated_memory[key] = value
+                        
+                print(f"Final memory structure: {list(updated_memory.keys())}")
+            
+            if has_validation_error:
+                tk.messagebox.showerror("Validation Error", validation_message)
+                return
+                
+            # Call callback with updated memory
+            self.callback(updated_memory)
+            
+            # Unbind mousewheel event before closing
+            if hasattr(self, 'mousewheel_func'):
+                try:
+                    self.dialog.unbind_all("<MouseWheel>")
+                except Exception as e:
+                    print(f"Unbind error: {e}")
+            
+            # Close dialog
+            self.dialog.destroy()
+            
+        except Exception as e:
+            error_msg = f"An error occurred while saving: {str(e)}"
+            print(error_msg)
+            tk.messagebox.showerror("Error", error_msg)
+            
+    def _validate_field(self, field_name, value):
+        """Validate field values"""
+        if field_name in ["category", "about", "content", "conversation_summary"] and not value.strip():
+            return False, f"{field_name} cannot be empty"
+        return True, ""

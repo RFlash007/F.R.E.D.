@@ -10,9 +10,6 @@ from duckduckgo_search import DDGS
 
 import Projects
 
-# NEW: Import DeepResearch
-import DeepResearch
-
 logging.basicConfig(level=logging.ERROR)
 
 def get_time() -> str:
@@ -23,64 +20,79 @@ def get_time() -> str:
     return time.strftime("%I:%M:%S %p, %d %B %Y", time.localtime(current_time))
 
 
-def quick_learn(topics: str) -> str:
+def search_and_summarize(topics: str, mode: str = "educational") -> str:
     """
-    Perform a DuckDuckGo-based search for informational learning.
-
+    Unified function to perform DuckDuckGo-based search and summarization.
+    
     1. Perform text & news searches on each topic (comma-separated).
-    2. Summarize the combined results in an "educational" style.
+    2. Summarize the combined results in the specified style.
     3. If summarization fails, return raw search results.
-
+    
     Args:
-        topics (str): The user's desired learning topics, comma-separated.
-
+        topics (str): The user's desired topics, comma-separated.
+        mode (str): The summarization mode - "educational" or "news".
+        
     Returns:
         str: A summary or raw results if summarization fails.
     """
     ddgs = DDGS()
-
+    
     # Split topics by commas
     topics_list = [t.strip() for t in topics.split(",") if t.strip()]
-
+    
     region = "us-en"
     safesearch = "off"
-
+    
     # Gather results
     text_results = []
     news_results = []
-
+    
+    # Configure search parameters based on mode
+    text_max_results = 2
+    news_max_results = 1 if mode == "educational" else 2
+    
     # For each topic, do text + news
     for topic in topics_list:
         text_results.extend(ddgs.text(
             keywords=topic,
             region=region,
             safesearch=safesearch,
-            max_results=2
+            max_results=text_max_results
         ))
         news_results.extend(ddgs.news(
             keywords=topic,
             region=region,
             safesearch=safesearch,
-            max_results=1
+            max_results=news_max_results
         ))
-
-    # Combine results for single summarization
-    combined_prompt = (
-        "You are an educational summarizer. Summarize both the search results and news "
-        "in a concise but thorough manner, focusing on learning and clarity. "
-        "If not enough info is provided, do your best to fill in context. "
-        "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
-        "Return ONLY the summary.\n\n"
-        f"Search Results:\n{text_results}\n\n"
-        f"News Results:\n{news_results}"
-    )
-
+    
+    # Configure prompt based on mode
+    if mode == "educational":
+        combined_prompt = (
+            "You are an educational summarizer. Summarize both the search results and news "
+            "in a concise but thorough manner, focusing on learning and clarity. "
+            "If not enough info is provided, do your best to fill in context. "
+            "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
+            "Return ONLY the summary.\n\n"
+            f"Search Results:\n{text_results}\n\n"
+            f"News Results:\n{news_results}"
+        )
+    else:  # news mode
+        combined_prompt = (
+            "You are a news summarizer. Summarize both the text results and news "
+            "in a journalistic style, highlighting recent or important events. "
+            "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
+            "Return ONLY the summary:\n\n"
+            f"Text Results:\n{text_results}\n\n"
+            f"News Results:\n{news_results}"
+        )
+    
     # Fallback if summarization fails
     bare_info = (
         f"[Text Results]\n{text_results}\n\n"
         f"[News Results]\n{news_results}"
     )
-
+    
     try:
         # Single summarization call
         response = ddgs.chat(
@@ -92,75 +104,23 @@ def quick_learn(topics: str) -> str:
     except Exception as e:
         logging.error(f"Summarization error: {e}")
         return bare_info
+
+
+# Legacy functions that now call the unified function
+def quick_learn(topics: str) -> str:
+    """
+    Perform a DuckDuckGo-based search for informational learning.
+    This is a legacy wrapper around search_and_summarize.
+    """
+    return search_and_summarize(topics, mode="educational")
 
 
 def news(topics: str) -> str:
     """
     Perform a DuckDuckGo-based search for news topics.
-
-    1. Perform text & news searches on each topic (comma-separated).
-    2. Summarize the combined results with a news-oriented style.
-    3. If summarization fails, return raw search results.
-
-    Args:
-        topics (str): The user's desired news topics, comma-separated.
-
-    Returns:
-        str: A summary or raw results if summarization fails.
+    This is a legacy wrapper around search_and_summarize.
     """
-    ddgs = DDGS()
-
-    # Split topics by commas
-    topics_list = [t.strip() for t in topics.split(",") if t.strip()]
-
-    region = "us-en"
-    safesearch = "off"
-
-    # Gather results
-    text_results = []
-    news_results = []
-
-    for topic in topics_list:
-        text_results.extend(ddgs.text(
-            keywords=topic,
-            region=region,
-            safesearch=safesearch,
-            max_results=2
-        ))
-        news_results.extend(ddgs.news(
-            keywords=topic,
-            region=region,
-            safesearch=safesearch,
-            max_results=2
-        ))
-
-    # Combined prompt for single summarization
-    combined_prompt = (
-        "You are a news summarizer. Summarize both the text results and news "
-        "in a journalistic style, highlighting recent or important events. "
-        "Structure your response with 'Text Summary:' and 'News Summary:' sections. "
-        "Return ONLY the summary:\n\n"
-        f"Text Results:\n{text_results}\n\n"
-        f"News Results:\n{news_results}"
-    )
-
-    # Fallback if summarization fails
-    bare_info = (
-        f"[Text Results]\n{text_results}\n\n"
-        f"[News Results]\n{news_results}"
-    )
-
-    try:
-        # Single summarization call
-        response = ddgs.chat(
-            keywords=combined_prompt,
-            model="gpt-4o-mini",
-            timeout=60
-        )
-        return response
-    except Exception as e:
-        logging.error(f"Summarization error: {e}")
-        return bare_info
+    return search_and_summarize(topics, mode="news")
 
 
 def get_system_status() -> str:
@@ -195,6 +155,7 @@ def get_system_status() -> str:
 
 
 available_functions = {
+    'search_and_summarize': search_and_summarize,
     'quick_learn': quick_learn,
     'news': news,
     'get_system_status': get_system_status,
@@ -210,9 +171,61 @@ available_functions = {
     'add_task': Task.add_task,
     'read_task': Task.read_task,
     'delete_task': Task.delete_task,
-    # NEW: Add deep_research tool function
-    'deep_research': DeepResearch.perform_research
 }
+
+
+def extract_and_execute(function_name, function, tool_args, param_config=None):
+    """
+    Generic function to extract parameters and execute functions with proper error handling
+    
+    Args:
+        function_name (str): The name of the function being called
+        function (callable): The function to execute
+        tool_args (dict): Arguments passed to the function
+        param_config (dict, optional): Configuration for parameter extraction
+            - required (list): List of required parameter names
+            - transforms (dict): Mapping of parameter names to transform functions
+    
+    Returns:
+        tuple: (success, result_or_error_message)
+    """
+    try:
+        # Default configuration if none provided
+        if param_config is None:
+            param_config = {
+                'required': [],
+                'transforms': {}
+            }
+        
+        # Extract parameters with optional transformation
+        params = {}
+        for param_name in param_config.get('required', []):
+            # Get the parameter value
+            param_value = tool_args.get(param_name)
+            
+            # Apply transform function if specified
+            transform = param_config.get('transforms', {}).get(param_name)
+            if transform and param_value is not None:
+                param_value = transform(param_value)
+                
+            # Check if required parameter is missing
+            if param_value is None:
+                raise ValueError(f"Missing required parameter: {param_name}")
+                
+            params[param_name] = param_value
+            
+        # Call the function with extracted parameters
+        if params:
+            outcome = function(**params)
+        else:
+            outcome = function()
+            
+        return True, outcome
+        
+    except Exception as e:
+        err_msg = f"Failed calling {function_name}: {e}"
+        print(err_msg)
+        return False, err_msg
 
 
 def handle_tool_calls(response, user_input):
@@ -227,6 +240,74 @@ def handle_tool_calls(response, user_input):
 
     results = []
 
+    # Function parameter configurations
+    param_configs = {
+        'search_and_summarize': {
+            'required': ['topics'],
+            'transforms': {}
+        },
+        'quick_learn': {
+            'required': ['topics'],
+            'transforms': {}
+        },
+        'news': {
+            'required': ['topics'],
+            'transforms': {}
+        },
+        'get_system_status': {
+            'required': [],
+            'transforms': {}
+        },
+        'create_note': {
+            'required': ['note_title', 'note_content'],
+            'transforms': {'note_title': str.lower}
+        },
+        'update_note': {
+            'required': ['note_title', 'note_content'],
+            'transforms': {'note_title': str.lower}
+        },
+        'delete_note': {
+            'required': ['note_title'],
+            'transforms': {'note_title': str.lower}
+        },
+        'read_note': {
+            'required': ['note_title'],
+            'transforms': {'note_title': str.lower}
+        },
+        'create_project': {
+            'required': ['project_name'],
+            'transforms': {'project_name': str.lower}
+        },
+        'delete_project': {
+            'required': ['project_name'],
+            'transforms': {'project_name': str.lower}
+        },
+        'delete_file_in_project': {
+            'required': ['project_name', 'file_name'],
+            'transforms': {'project_name': str.lower, 'file_name': str.lower}
+        },
+        'read_file_in_project': {
+            'required': ['project_name', 'file_name'],
+            'transforms': {'project_name': str.lower, 'file_name': str.lower}
+        },
+        'edit_file_in_project': {
+            'required': ['project_name', 'file_name', 'file_content'],
+            'transforms': {'project_name': str.lower, 'file_name': str.lower}
+        },
+        'add_task': {
+            'required': ['task_title', 'task_content'],
+            'transforms': {}
+        },
+        'read_task': {
+            'required': [],
+            'transforms': {}
+        },
+        'delete_task': {
+            'required': ['task_title'],
+            'transforms': {}
+        }
+    }
+
     for tool_call in tool_calls:
         function_name = tool_call.function.name
         tool_args = tool_call.function.arguments or {}
@@ -237,128 +318,17 @@ def handle_tool_calls(response, user_input):
             print(msg)
             results.append(msg)
             continue
-
-        # Attempt to call the function with the provided arguments
-        if function_name in ('quick_learn', 'news'):
-            # e.g. "topics" is expected
-            topics = tool_args.get('topics', user_input)
-            try:
-                outcome = function(topics)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-
-        elif function_name == 'get_system_status':
-            try:
-                system_report = function()
-                results.append(system_report)
-            except Exception as e:
-                err_msg = f"Failed calling get_system_status: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name in ('create_note', 'update_note'):
-            try:
-                note_title = tool_args.get('note_title').lower()
-                note_content = tool_args.get('note_content')
-                if note_title is None or note_content is None:
-                    raise ValueError("Missing required note_title or note_content")
-                outcome = function(note_title, note_content)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name in ('delete_note', 'read_note'):
-            try:
-                note_title = tool_args.get('note_title').lower()
-                if note_title is None:
-                    raise ValueError("Missing required note_title")
-                outcome = function(note_title)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name in ('create_project', 'delete_project'):
-            try:
-                project_name = tool_args.get('project_name').lower()
-                if project_name is None:
-                    raise ValueError("Missing required project_name")
-                outcome = function(project_name)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name in ('delete_file_in_project', 'read_file_in_project'):
-            try:
-                project_name = tool_args.get('project_name').lower()
-                file_name = tool_args.get('file_name').lower()
-                outcome = function(project_name, file_name)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name in ('edit_file_in_project'):
-            try:
-                project_name = tool_args.get('project_name').lower()
-                file_name = tool_args.get('file_name').lower()
-                file_content = tool_args.get('file_content')
-                outcome = function(project_name, file_name, file_content)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling {function_name}: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name == 'add_task':
-            try:
-                task_title = tool_args.get('task_title')
-                task_content = tool_args.get('task_content')
-                if task_title is None or task_content is None:
-                    raise ValueError("Missing required task_title or task_content")
-                outcome = function(task_title, task_content)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling add_task: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name == 'read_task':
-            try:
-                outcome = function()
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling read_task: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name == 'delete_task':
-            try:
-                task_title = tool_args.get('task_title')
-                if task_title is None:
-                    raise ValueError("Missing required task_title")
-                outcome = function(task_title)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling delete_task: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        elif function_name == 'deep_research':
-            try:
-                research_query = tool_args.get('research_query')
-                if research_query is None:
-                    raise ValueError("Missing required research_query")
-                outcome = function(research_query)
-                results.append(outcome)
-            except Exception as e:
-                err_msg = f"Failed calling deep_research: {e}"
-                print(err_msg)
-                results.append(err_msg)
-        else:
-            msg = f"Unhandled function: {function_name}"
-            print(msg)
-            results.append(msg)
+            
+        # Special case for search functions
+        if function_name in ('quick_learn', 'news', 'search_and_summarize'):
+            # Default to user input if topics not provided
+            if 'topics' not in tool_args:
+                tool_args['topics'] = user_input
+                
+        # Use the generic extraction and execution function
+        config = param_configs.get(function_name, {'required': [], 'transforms': {}})
+        success, outcome = extract_and_execute(function_name, function, tool_args, config)
+        results.append(outcome)
 
     # Return combined output if multiple calls
     if len(results) == 1:

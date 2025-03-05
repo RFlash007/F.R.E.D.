@@ -26,7 +26,7 @@ from shared_resources import voice_queue
 # We use the fine-tuned routing model "philschmid/modernbert-llm-router"
 # which is based on BERT-base and outputs multiple classes
 
-
+#Routing is broken due to 7b model not being able to handle the tool calls.
 def route_query(query: str) -> str:
     """
     Routes the query to the appropriate model based on query complexity.
@@ -52,12 +52,12 @@ def route_query(query: str) -> str:
             return "FRED_14b"
         else:
             print(f"Routing simple query to FRED_7b")
-            return "FRED_7b"
+            return "FRED_14b"
             
     except Exception as e:
         print(f"Error in route_query: {str(e)}")
         print(f"Error type: {type(e)}")
-        return "FRED_7b"
+        return "FRED_14b"
 
 conversation = []
 MAX_CONVERSATION_LENGTH = 5  # Adjust as needed
@@ -71,7 +71,7 @@ def shutdown_app(current_ui):
 def save_conversation(conversation_history):
     """Save conversation history to JSON files."""
     try:
-        history_dir = "conversation_history"
+        history_dir = "conversation_history"    
         os.makedirs(history_dir, exist_ok=True)
         current_session = os.path.join(history_dir, "current_session.json")
         archive_file = os.path.join(history_dir, f"archive_{datetime.now().strftime('%Y%m%d')}.json")
@@ -93,18 +93,38 @@ def process_message(user_input, ui_instance=None):
     start_time = datetime.now()
     episodic_memories = Episodic.recall_episodic(user_input)
     semantic_memories = Semantic.recall_semantic(user_input)
-    assumptions = Dreaming.recall_assumptions(user_input)
+    
+    # Use the hybrid recall mode for dreams - balancing real and synthetic dreams
+    # Adjust real_ratio based on query type for optimal results
+    if any(word in user_input.lower() for word in ['fact', 'specific', 'what did', 'history', 'remember', 'recall']):
+        # For factual/specific queries, prioritize real dreams
+        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.7)
+    elif any(word in user_input.lower() for word in ['imagine', 'creative', 'idea', 'possibility', 'future']):
+        # For creative/imaginative queries, prioritize synthetic dreams
+        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.3)
+    else:
+        # For balanced queries, use an even mix
+        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.5)
+    
     elapsed_time = datetime.now() - start_time
     print(f"Memory recall took: {elapsed_time.total_seconds():.2f} seconds")
     
     # 2. If the user says "goodbye", finalize conversation.
     if user_input.lower() == "goodbye":
-        summary = summarize(conversation)
+        # Convert conversation list to string format for summarization
+        conversation_text = ""
+        for msg in conversation:
+            if 'content' in msg:
+                role = msg.get('role', 'unknown')
+                conversation_text += f"{role}: {msg['content']}\n\n"
+        
+        summary = summarize(conversation_text)
         Episodic.create_episodic(summary)
         Semantic.create_semantic(summary)
+        Dreaming.create_dream()
         Episodic.update_episodic(summary)
         Semantic.update_semantic(summary)
-        Dreaming.update_assumptions()
+        Dreaming.update_dreaming()
         save_conversation(conversation)
         if ui_instance:
             ui_instance.display_message("F.R.E.D.: Goodbye for now.", "assistant")
@@ -118,15 +138,38 @@ def process_message(user_input, ui_instance=None):
         f"The current time and date is: {Tools.get_time()}\n"
         f"These are your memories that may help answer the user's question. Reference them only if directly helpful:\n{episodic_memories}\n\n"
         f"Here are facts from your memory. Reference them only if directly helpful:\n{semantic_memories}\n"
-        f"These are your assumptions. Reference them only if directly helpful:\n{assumptions}\n"
+        f"These are your dreams and insights. Reference them only if directly helpful:\n{dreams}\n"
         "(END OF FRED DATABASE)"
     )
     conversation.append({"role": "user", "content": user_prompt})
 
-    # 4. Define tool schemas (unchanged from the original script).
-
     # 4. Define tool schemas (unchanged from your original script)
     tools_schema = [
+        {
+            'type': 'function',
+            'function': {
+                'name': 'search_and_summarize',
+                'description': (
+                    "Perform a DuckDuckGo-based search for information and summarize the results. "
+                    "Provide 'topics' as comma-separated search topics and 'mode' as either 'educational' or 'news'."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'topics': {
+                            'type': 'string',
+                            'description': 'Comma-separated topics to search for'
+                        },
+                        'mode': {
+                            'type': 'string',
+                            'description': 'Search mode: "educational" (default) or "news"',
+                            'enum': ['educational', 'news']
+                        }
+                    },
+                    'required': ['topics']
+                }
+            }
+        },
         {
             'type': 'function',
             'function': {
@@ -431,23 +474,6 @@ def process_message(user_input, ui_instance=None):
                     'required': ['task_title']
                 }
             }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'deep_research',
-                'description': "Perform in-depth, multi-step research on a given topic. Return a comprehensive report including an executive summary, detailed methodology, systematic analysis, transparent chain-of-thought, formatted citations, and conclusive insights.",
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'research_query': {
-                            'type': 'string',
-                            'description': 'The research query or topic'
-                        }
-                    },
-                    'required': ['research_query']
-                }
-            }
         }
     ]
 
@@ -473,7 +499,7 @@ def process_message(user_input, ui_instance=None):
                 f"Relevant info from the tool:\n{tool_answer}\n\n"
                 f"These are your memories that may help answer the user's question. Reference them only if directly helpful:\n{episodic_memories}\n\n"
                 f"Here are facts from your memory. Reference them only if directly helpful:\n{semantic_memories}\n"
-                f"These are your assumptions. Reference them only if directly helpful:\n{assumptions}\n"
+                f"These are your dreams and insights. Reference them only if directly helpful:\n{dreams}\n"
                 "(END OF FRED DATABASE)"
             )
             conversation.pop()
@@ -494,6 +520,20 @@ def process_message(user_input, ui_instance=None):
 
     # 9. Send the response to voice output.
     voice_queue.put(response_content)
+
+    # Check if the input is a JSON string containing messages
+    # Convert conversation list to a string to check if it's a JSON format
+    conversation_str = json.dumps(conversation)
+    if conversation_str.strip().startswith('[') and any('role' in msg and 'content' in msg for msg in conversation):
+        # We already have the structured conversation in the 'conversation' variable
+        # Extract only the text content from each message to create a text representation
+        text_content = ""
+        for msg in conversation:
+            if 'content' in msg:
+                role = msg.get('role', 'unknown')
+                text_content += f"{role}: {msg['content']}\n\n"
+        conversation_text = text_content.strip()
+        # Note: We're not reassigning 'conversation' as it should remain a list
 
     return response_content
 
@@ -576,18 +616,25 @@ if __name__ == "__main__":
     Semantic.initialize_cache()  # Initialize semantic cache.
     Episodic.initialize_cache()   # Initialize episodic cache.
     Dreaming.initialize_cache()   # Initialize dreams cache.
+    
+    # Perform a "fake" query to ensure the cache is properly loaded for each memory system
+    dummy_query = "test query for cache initialization"
+    Semantic.recall_semantic(dummy_query, top_k=1)
+    Episodic.recall_episodic(dummy_query, top_k=1)
+    Dreaming.recall_dreams(dummy_query, top_k=1)
+    
     print(f"Initialization took: {datetime.now() - time_start}")
 
     # Define separate modelfiles.
     modelfile_14b = f'''
 FROM huihui_ai/qwen2.5-abliterate:14b
 SYSTEM {final_prompt}
-PARAMETER num_ctx 4096
+PARAMETER num_ctx 8192
 '''
     modelfile_7b = f'''
 FROM huihui_ai/qwen2.5-abliterate:7b
 SYSTEM {final_prompt}
-PARAMETER num_ctx 4096
+PARAMETER num_ctx 8192
 '''
 
     try:

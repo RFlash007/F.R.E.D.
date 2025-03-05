@@ -20,7 +20,7 @@ class VoiceTranscriber:
         self.silence_threshold = 0.0015  # Initial threshold
         self.calibration_samples = []
         self.calibration_duration = 2  # seconds
-        self.silence_duration = 1.0    # Seconds of silence to mark end of speech
+        self.silence_duration = 0.7    # Seconds of silence to mark end of speech
         self.last_speech_time = time.time()
         self.speech_buffer = []
         

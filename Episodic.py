@@ -544,7 +544,3 @@ def consolidate_episodic(similarity_threshold: float = 0.99) -> str:
     except Exception as e:
         logging.error(f"Error consolidating episodic memories: {e}")
         return f"Error: {str(e)}"
-
-    
-
-
