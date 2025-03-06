@@ -121,7 +121,7 @@ class VoiceTranscriber:
                         for segment in segments:
                             text = segment.text.strip().lower()
                             
-                            if text:
+                            if text and text != "thanks for watching!":
                                 print(f"\nDetected text: {text}")  # Debug detected text
                             
                                 # Check for wake words when not listening

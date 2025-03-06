@@ -119,13 +119,19 @@ def create_semantic(memory: str) -> str:
         try:
             # Parse the JSON response directly
             facts_data = json.loads(content)
+            
+            # Handle empty responses or non-list responses properly
+            if not facts_data:
+                logging.warning("AI returned empty facts data")
+                return ""
+                
             if not isinstance(facts_data, list):
                 facts_data = [facts_data]
 
             with open(FACTS_FILE, 'a', encoding='utf-8') as file:
                 for data in facts_data:
                     # Validate presence of keys
-                    if "category" not in data or "content" not in data:
+                    if not isinstance(data, dict) or "category" not in data or "content" not in data:
                         logging.error(f"AI output missing 'category' or 'content': {data}")
                         continue
 
@@ -193,6 +199,13 @@ INSTRUCTIONS:
             if response.get("message", {}).get("content"):
                 try:
                     new_data = json.loads(response["message"]["content"])
+                    
+                    # Handle empty or invalid responses
+                    if not new_data or not isinstance(new_data, dict):
+                        logging.warning(f"AI returned invalid data format: {new_data}. Keeping original fact.")
+                        updated_facts.append(fact)
+                        continue
+                        
                     if "category" not in new_data or "content" not in new_data:
                         logging.warning(f"AI output missing keys. Keeping original: {new_data}")
                         updated_facts.append(fact)

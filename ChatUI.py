@@ -470,7 +470,7 @@ class ChatUI:
         self.thinking_indicator_canvas.pack(fill='x', pady=(5, 0))
         
     def _initialize_arc_reactor(self):
-        """Create the globe visualization for F.R.E.D."""
+        """Create the arc reactor visualization reminiscent of Stark Industries Mark 7 design."""
         # Ensure canvas is created
         if not hasattr(self, 'arc_reactor_canvas'):
             return
@@ -481,7 +481,7 @@ class ChatUI:
         center_x = width / 2
         center_y = height / 2
         
-        # Create outer ring (globe container) with pulsing effect
+        # Create outer ring with pulsing effect
         outer_radius = 75
         self.arc_reactor_canvas.create_oval(
             center_x - outer_radius, center_y - outer_radius,
@@ -491,7 +491,7 @@ class ChatUI:
             tags="reactor_ring"
         )
         
-        # Create middle ring - represents equator with variable thickness
+        # Create middle ring
         middle_radius = 60
         self.arc_reactor_canvas.create_oval(
             center_x - middle_radius, center_y - middle_radius,
@@ -501,32 +501,63 @@ class ChatUI:
             tags="reactor_ring"
         )
         
-        # Create globe meridians with varying opacity
-        for i in range(6):
-            angle = math.pi * i / 6
-            # Vertical meridian with varying opacity
-            opacity = 0.3 + 0.7 * (i % 2)  # Alternate opacity for visual interest
-            color = self._adjust_color_opacity(self.colors['accent'], opacity)
+        # Create triangular housing (Mark 7 style)
+        triangle_size = 50
+        triangle_points = [
+            center_x, center_y - triangle_size,  # Top point
+            center_x - triangle_size * 0.866, center_y + triangle_size * 0.5,  # Bottom left
+            center_x + triangle_size * 0.866, center_y + triangle_size * 0.5,  # Bottom right
+        ]
+        self.arc_reactor_canvas.create_polygon(
+            triangle_points,
+            outline=self.colors['stark_glow'],
+            fill=self._adjust_color_opacity(self.colors['stark_blue'], 0.3),
+            width=2,
+            tags="reactor_triangle"
+        )
+        
+        # Add inner triangular detail
+        inner_triangle_size = triangle_size * 0.7
+        inner_triangle_points = [
+            center_x, center_y - inner_triangle_size,  # Top point
+            center_x - inner_triangle_size * 0.866, center_y + inner_triangle_size * 0.5,  # Bottom left
+            center_x + inner_triangle_size * 0.866, center_y + inner_triangle_size * 0.5,  # Bottom right
+        ]
+        self.arc_reactor_canvas.create_polygon(
+            inner_triangle_points,
+            outline=self.colors['stark_glow'],
+            fill="",
+            width=1.5,
+            tags="reactor_triangle_inner"
+        )
+        
+        # Add detail lines in triangular pattern
+        for i in range(3):
+            angle = math.pi * 2 * i / 3
+            length = triangle_size * 0.9
+            x1 = center_x
+            y1 = center_y
+            x2 = center_x + length * math.sin(angle)
+            y2 = center_y - length * math.cos(angle)
             
-            self.arc_reactor_canvas.create_arc(
-                center_x - middle_radius, center_y - middle_radius,
-                center_x + middle_radius, center_y + middle_radius,
-                start=i*30, extent=2,
-                outline=color,
-                style="arc",
-                tags="reactor_meridian"
+            self.arc_reactor_canvas.create_line(
+                x1, y1, x2, y2,
+                fill=self.colors['stark_glow'],
+                width=1.5,
+                tags="reactor_detail"
             )
         
-        # Create globe parallels with varying thickness
-        for i in range(3):
-            radius = middle_radius * (0.25 + 0.25 * i)
-            thickness = 1.5 - 0.5 * i  # Thinner lines for inner parallels
-            self.arc_reactor_canvas.create_oval(
-                center_x - radius, center_y - radius,
-                center_x + radius, center_y + radius,
-                outline=self.colors['accent_dim'],
-                width=thickness,
-                tags="reactor_parallel"
+        # Create circular segments in outer ring (like Mark 7 design)
+        for i in range(6):
+            start_angle = i * 60
+            self.arc_reactor_canvas.create_arc(
+                center_x - outer_radius * 0.8, center_y - outer_radius * 0.8,
+                center_x + outer_radius * 0.8, center_y + outer_radius * 0.8,
+                start=start_angle, extent=30,
+                outline=self.colors['stark_glow'],
+                width=1.5,
+                style="arc",
+                tags="reactor_segments"
             )
         
         # Create core with pulsing effect
@@ -882,10 +913,15 @@ class ChatUI:
         """Load memories from JSON files"""
         try:
             # Import the memory format utility
-            import memory_format_utils
-            
-            # Ensure memory files are in the correct format
-            memory_format_utils.ensure_all_memory_files()
+            try:
+                import memory_format_utils
+                
+                # Ensure memory files are in the correct format
+                memory_format_utils.ensure_all_memory_files()
+            except ImportError:
+                # Fallback implementation for memory format checking
+                print("Warning: memory_format_utils module not found. Using fallback implementation.")
+                self._ensure_memory_files_fallback()
             
             # Initialize memories dictionary
             self.memories = {
@@ -966,6 +1002,77 @@ class ChatUI:
         except Exception as e:
             print(f"Error in _load_memories: {e}")
     
+    def _ensure_memory_files_fallback(self):
+        """Fallback implementation of memory file format checking"""
+        import json
+        import os
+        
+        memory_files = {
+            "semantic": "Semantic.json",
+            "episodic": "Episodic.json",
+            "dreaming": "Dreaming.json"
+        }
+        
+        for memory_type, file_path in memory_files.items():
+            # Check if file exists
+            if not os.path.exists(file_path):
+                print(f"Warning: {file_path} not found. Will be created when needed.")
+                continue
+                
+            # Skip empty files
+            if os.path.getsize(file_path) == 0:
+                continue
+                
+            # Read the file content
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            
+            if not content:
+                continue
+                
+            # Try parsing as a JSON array
+            try:
+                data = json.loads(content)
+                
+                # If it's not a list, we can't do much
+                if not isinstance(data, list):
+                    print(f"Warning: Expected a JSON array in {file_path}. Format might be incorrect.")
+                    continue
+                
+                # Check if it's in JSONL format or needs conversion
+                needs_conversion = False
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = [line.strip() for line in f if line.strip()]
+                        
+                    # Try parsing each line as JSON
+                    for line in lines:
+                        json.loads(line)
+                except json.JSONDecodeError:
+                    needs_conversion = True
+                
+                # Convert to JSONL format if needed
+                if needs_conversion:
+                    # Create backup
+                    backup_file = f"{file_path}.bak"
+                    with open(backup_file, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    
+                    print(f"Created backup at {backup_file}")
+                    
+                    # Convert to JSONL format
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        for item in data:
+                            f.write(json.dumps(item) + '\n')
+                    
+                    print(f"Converted {file_path} to JSONL format ({len(data)} items).")
+            
+            except json.JSONDecodeError as e:
+                print(f"Error parsing {file_path}: {e}")
+                print(f"The file is neither valid JSON nor JSONL format.")
+            except Exception as e:
+                print(f"Error processing {file_path}: {str(e)}")
+    
     def _validate_memory_structure(self, memory, memory_type):
         """Validate memory structure based on memory type"""
         try:
@@ -1045,7 +1152,7 @@ class ChatUI:
         try:
             stats_text = f"Semantic: {len(self.memories['semantic'])} | "
             stats_text += f"Episodic: {len(self.memories['episodic'])} | "
-            stats_text += f"Dreams: {len(self.memories['dreaming'])}"
+            stats_text += f"Dreams: {len(self.memories['dreaming'])}      "  # Added extra padding spaces to ensure visibility
             self.status_bar.config(text=stats_text)
         except Exception as e:
             print(f"Error updating memory stats: {e}")
@@ -1668,6 +1775,7 @@ class ChatUI:
                 "timestamp": datetime.now().isoformat()
             })
             
+            # Clear input field before processing message
             self.input_field.delete(0, tk.END)
             
             threading.Thread(
@@ -1732,6 +1840,8 @@ class ChatUI:
             self.root.after(0, lambda: self.input_field.configure(state='normal'))
             self.root.after(0, lambda: self.send_button.configure(state='normal'))
             self.root.after(0, lambda: self.input_field.focus_set())
+            # Ensure input field is clear
+            self.root.after(0, lambda: self.input_field.delete(0, tk.END))
             self.root.after(0, self._stop_thinking_indicator)
     
     def _clear_chat(self, event=None):
@@ -1880,9 +1990,6 @@ class ChatUI:
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
         self.root.geometry(f'+{x}+{y}')
         
-        # Display startup message
-        self.display_message("F.R.E.D. Neural Interface initialized. At your service, sir.", "assistant")
-        
         self.root.mainloop()
 
     def _update_memory(self, memory_type, index, updated_memory):
@@ -1986,6 +2093,34 @@ class ChatUI:
                     center_x - glow_radius, center_y - glow_radius,
                     center_x + glow_radius, center_y + glow_radius
                 )
+                
+                # Update triangular housing (Mark 7 style)
+                triangle_size = 50 * (1 + 0.05 * math.sin(step * 0.15))
+                triangle_points = [
+                    center_x, center_y - triangle_size,  # Top point
+                    center_x - triangle_size * 0.866, center_y + triangle_size * 0.5,  # Bottom left
+                    center_x + triangle_size * 0.866, center_y + triangle_size * 0.5,  # Bottom right
+                ]
+                try:
+                    triangle_item = self.arc_reactor_canvas.find_withtag("reactor_triangle")[0]
+                    self.arc_reactor_canvas.coords(triangle_item, *triangle_points)
+                    
+                    # Update inner triangle
+                    inner_triangle_size = triangle_size * 0.7
+                    inner_triangle_points = [
+                        center_x, center_y - inner_triangle_size,  # Top point
+                        center_x - inner_triangle_size * 0.866, center_y + inner_triangle_size * 0.5,  # Bottom left
+                        center_x + inner_triangle_size * 0.866, center_y + inner_triangle_size * 0.5,  # Bottom right
+                    ]
+                    inner_triangle_item = self.arc_reactor_canvas.find_withtag("reactor_triangle_inner")[0]
+                    self.arc_reactor_canvas.coords(inner_triangle_item, *inner_triangle_points)
+                    
+                    # Change opacity based on pulse
+                    glow_intensity = 0.7 + 0.3 * math.sin(step * 0.15)
+                    triangle_color = self._adjust_color_opacity(self.colors['stark_blue'], 0.3 * glow_intensity)
+                    self.arc_reactor_canvas.itemconfig(triangle_item, fill=triangle_color)
+                except (IndexError, tk.TclError):
+                    pass  # Handle case where triangles haven't been created yet
                 
                 # Continue animation
                 self.root.after(50, lambda: pulse_animation(step + 1))

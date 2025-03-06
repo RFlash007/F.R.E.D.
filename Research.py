@@ -3,7 +3,7 @@ from duckduckgo_search import DDGS
 import ollama
 from pydantic import BaseModel
 from Semantic import update_semantic
-import Notes
+import Task
 import logging
 
 class ResearchAnalysis(BaseModel):
@@ -77,7 +77,7 @@ class ResearchAgent:
             for direction in analysis.new_directions[:2]:
                 self.research(direction, depth+1)
                 
-            return Notes.create_note(self.name, self.paper)
+            return Task.create_note(self.name, self.paper)
         except Exception as e:
             print(f"Error parsing analysis: {str(e)}")  # Added error printing
             return "Error parsing analysis"
@@ -125,5 +125,4 @@ class ResearchAgent:
         except Exception:
             return []
 
-if __name__ == "__main__":
-    Notes.delete_note("AI")
+

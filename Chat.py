@@ -1,6 +1,7 @@
 import ollama
 from duckduckgo_search import DDGS
 import Dreaming
+import MorningReport
 import Tools
 import Voice
 import Semantic
@@ -79,6 +80,11 @@ def save_conversation(conversation_history):
             json.dump(conversation_history, f, indent=2)
         with open(archive_file, 'w', encoding='utf-8') as f:
             json.dump(conversation_history, f, indent=2)
+            
+        # Process the newly saved conversation to extract dreams
+        dreams_count = Dreaming.process_new_conversation(archive_file)
+        logging.info(f"Processed conversation and saved {dreams_count} dreams")
+        
         return True
     except Exception as e:
         print(f"Error saving conversation history: {str(e)}")
@@ -121,10 +127,10 @@ def process_message(user_input, ui_instance=None):
         summary = summarize(conversation_text)
         Episodic.create_episodic(summary)
         Semantic.create_semantic(summary)
-        Dreaming.create_dream()
+        Dreaming.create_dream(summary)
         Episodic.update_episodic(summary)
         Semantic.update_semantic(summary)
-        Dreaming.update_dreaming()
+        Dreaming.update_dream(summary)
         save_conversation(conversation)
         if ui_instance:
             ui_instance.display_message("F.R.E.D.: Goodbye for now.", "assistant")
@@ -150,8 +156,11 @@ def process_message(user_input, ui_instance=None):
             'function': {
                 'name': 'search_and_summarize',
                 'description': (
-                    "Perform a DuckDuckGo-based search for information and summarize the results. "
-                    "Provide 'topics' as comma-separated search topics and 'mode' as either 'educational' or 'news'."
+                    "Search for information and summarize the results. "
+                    "Provides two modes: 'educational' for learning about topics, and 'news' for current events. "
+                    "Use 'educational' mode for general knowledge and explanations. "
+                    "Use 'news' mode for recent events and developments. "
+                    "Provide 'topics' as comma-separated search topics."
                 ),
                 'parameters': {
                     'type': 'object',
@@ -173,49 +182,10 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'quick_learn',
-                'description': (
-                    "Perform a DuckDuckGo-based search for informational learning. "
-                    "Provide 'topics' as comma-separated search topics."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'topics': {
-                            'type': 'string',
-                            'description': 'Comma-separated topics to search for'
-                        }
-                    },
-                    'required': ['topics']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'news',
-                'description': (
-                    "Perform a DuckDuckGo-based search for news topics. "
-                    "Provide 'topics' as comma-separated search topics."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'topics': {
-                            'type': 'string',
-                            'description': 'Comma-separated news topics'
-                        }
-                    },
-                    'required': ['topics']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
                 'name': 'get_system_status',
                 'description': (
-                    "Get system status information: CPU usage, Memory usage, Disk usage, and GPU usage."
+                    "Get system status information: CPU usage, Memory usage, Disk usage, "
+                    "and GPU usage (if available). Returns a formatted report with current system metrics."
                 ),
                 'parameters': {
                     'type': 'object',
@@ -424,7 +394,7 @@ def process_message(user_input, ui_instance=None):
             'function': {
                 'name': 'add_task',
                 'description': (
-                    "Add a new task to the task list."
+                    "Add a new task to the task list with an optional due date."
                 ),
                 'parameters': {
                     'type': 'object',
@@ -436,6 +406,10 @@ def process_message(user_input, ui_instance=None):
                         'task_content': {
                             'type': 'string',
                             'description': 'Content/description of the task'
+                        },
+                        'due_date': {
+                            'type': 'string',
+                            'description': 'Due date for the task in YYYY-MM-DD HH:MM:SS format. Will be set to None if not provided.'
                         }
                     },
                     'required': ['task_title', 'task_content']
@@ -445,9 +419,23 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'read_task',
+                'name': 'list_tasks',
                 'description': (
-                    "Read all tasks from the task list."
+                    "List all tasks from the task list."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {},
+                    'required': []
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'check_expired_tasks',
+                'description': (
+                    "Check for and delete tasks that are more than 3 days past their due date."
                 ),
                 'parameters': {
                     'type': 'object',
@@ -548,6 +536,14 @@ def chat_loop():
     # Initialize the voice system.
     voice_system = initialize_voice_system(lambda msg: process_message(msg, ui))
     voice_system.set_ui(ui)
+    
+    # Generate morning report when AI starts
+    try:
+        morning_report = MorningReport.generate_morning_report()
+        ui.display_message(morning_report, "assistant")
+        voice_queue.put(f"Good morning, sir. I've prepared your daily briefing.")
+    except Exception as e:
+        print(f"Error generating morning report: {str(e)}")
 
     try:
         # Start the voice processing thread.

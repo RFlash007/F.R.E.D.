@@ -1,8 +1,8 @@
 import os
 import time
 import logging
-import Notes
 import Task
+import MorningReport
 
 import psutil
 import GPUtil
@@ -106,23 +106,6 @@ def search_and_summarize(topics: str, mode: str = "educational") -> str:
         return bare_info
 
 
-# Legacy functions that now call the unified function
-def quick_learn(topics: str) -> str:
-    """
-    Perform a DuckDuckGo-based search for informational learning.
-    This is a legacy wrapper around search_and_summarize.
-    """
-    return search_and_summarize(topics, mode="educational")
-
-
-def news(topics: str) -> str:
-    """
-    Perform a DuckDuckGo-based search for news topics.
-    This is a legacy wrapper around search_and_summarize.
-    """
-    return search_and_summarize(topics, mode="news")
-
-
 def get_system_status() -> str:
     """
     Get system status information: CPU usage, Memory usage, Disk usage,
@@ -156,21 +139,21 @@ def get_system_status() -> str:
 
 available_functions = {
     'search_and_summarize': search_and_summarize,
-    'quick_learn': quick_learn,
-    'news': news,
     'get_system_status': get_system_status,
-    'create_note': Notes.create_note,
-    'update_note': Notes.update_note,
-    'delete_note': Notes.delete_note,
-    'read_note': Notes.read_note,
+    'create_note': Task.create_note,
+    'update_note': Task.update_note,
+    'delete_note': Task.delete_note,
+    'read_note': Task.read_note,
     'create_project': Projects.create_project,
     'delete_project': Projects.delete_project,
     'delete_file_in_project': Projects.delete_file_in_project,
     'read_file_in_project': Projects.read_file_in_project,
     'edit_file_in_project': Projects.edit_file_in_project,
     'add_task': Task.add_task,
-    'read_task': Task.read_task,
     'delete_task': Task.delete_task,
+    'list_tasks': Task.list_tasks,
+    'check_expired_tasks': Task.check_expired_tasks,
+    'morning_report': MorningReport.generate_morning_report,
 }
 
 
@@ -246,14 +229,6 @@ def handle_tool_calls(response, user_input):
             'required': ['topics'],
             'transforms': {}
         },
-        'quick_learn': {
-            'required': ['topics'],
-            'transforms': {}
-        },
-        'news': {
-            'required': ['topics'],
-            'transforms': {}
-        },
         'get_system_status': {
             'required': [],
             'transforms': {}
@@ -298,14 +273,22 @@ def handle_tool_calls(response, user_input):
             'required': ['task_title', 'task_content'],
             'transforms': {}
         },
-        'read_task': {
-            'required': [],
-            'transforms': {}
-        },
         'delete_task': {
             'required': ['task_title'],
             'transforms': {}
-        }
+        },
+        'list_tasks': {
+            'required': [],
+            'transforms': {}
+        },
+        'check_expired_tasks': {
+            'required': [],
+            'transforms': {}
+        },
+        'morning_report': {
+            'required': [],
+            'transforms': {}
+        },
     }
 
     for tool_call in tool_calls:
@@ -320,7 +303,7 @@ def handle_tool_calls(response, user_input):
             continue
             
         # Special case for search functions
-        if function_name in ('quick_learn', 'news', 'search_and_summarize'):
+        if function_name in ('search_and_summarize', 'get_system_status'):
             # Default to user input if topics not provided
             if 'topics' not in tool_args:
                 tool_args['topics'] = user_input
