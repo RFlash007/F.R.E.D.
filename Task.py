@@ -258,29 +258,64 @@ def read_note(note_title: str) -> str:
 
 def delete_note(note_title: str) -> str:
     """
-    Delete an existing note.
+    Delete a note file.
 
     Args:
         note_title (str): The title of the note to delete.
 
     Returns:
-        str: A message indicating the success of the deletion.
+        str: A message indicating whether the note was deleted successfully.
     """
-    # Create Notes directory if it doesn't exist
-    os.makedirs("Notes", exist_ok=True)
-    
-    with chdir("Notes"):
-        try:
-            os.remove(f"{note_title}.txt")
+    try:
+        os.makedirs("Notes", exist_ok=True)
+        note_path = os.path.join("Notes", f"{note_title}.txt")
+        
+        if os.path.exists(note_path):
+            os.remove(note_path)
             return f"Note '{note_title}' deleted successfully."
-        except FileNotFoundError:
+        else:
             return f"Note '{note_title}' not found."
+    except Exception as e:
+        return f"Error deleting note: {str(e)}"
+
+
+def list_notes() -> str:
+    """
+    List all available notes.
+
+    Returns:
+        str: A formatted string containing all note titles and their creation dates.
+    """
+    try:
+        os.makedirs("Notes", exist_ok=True)
+        notes_dir = "Notes"
+        
+        notes = []
+        if os.path.exists(notes_dir):
+            for filename in os.listdir(notes_dir):
+                if filename.endswith(".txt"):
+                    note_title = filename[:-4]  # Remove .txt extension
+                    note_path = os.path.join(notes_dir, filename)
+                    
+                    # Get the creation time of the note file
+                    creation_time = datetime.fromtimestamp(os.path.getctime(note_path))
+                    creation_date = creation_time.strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    notes.append(f"📝 {note_title} (Created: {creation_date})")
+        
+        if notes:
+            return "Available Notes:\n" + "\n".join(notes)
+        else:
+            return "No notes found."
+    except Exception as e:
+        return f"Error listing notes: {str(e)}"
 
 
 def check_expired_tasks() -> str:
     """
     Check for and delete tasks that are more than 3 days past their due date.
-    This function can be called periodically to automatically clean up expired tasks.
+    This function runs automatically on startup before morning report generation.
+    It helps keep the task list clean by removing outdated tasks.
 
     Returns:
         str: A message indicating how many tasks were deleted, if any.

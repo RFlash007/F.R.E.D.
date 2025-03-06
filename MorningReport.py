@@ -307,6 +307,9 @@ def generate_morning_report(city="Mechanicsville, VA"):
     Returns:
         str: Formatted morning report.
     """
+    # First, run the task cleanup automatically
+    expired_task_result = Task.check_expired_tasks()
+    
     current_date = datetime.now().strftime("%A, %B %d, %Y")
     
     # Generate header
@@ -317,6 +320,10 @@ def generate_morning_report(city="Mechanicsville, VA"):
     
     # Add task list
     report += get_task_list() + "\n\n"
+    
+    # Add expired task notification if tasks were deleted
+    if "No expired tasks found" not in expired_task_result and "No tasks found" not in expired_task_result:
+        report += f"ℹ️ {expired_task_result}\n\n"
     
     # Add combined news summary (single API call instead of 4)
     report += get_combined_news_summary() + "\n\n"

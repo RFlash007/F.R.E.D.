@@ -76,7 +76,7 @@ def load_cached_embeddings():
             return None
             
         # Load cached data
-        cache_data = torch.load(EMBEDDINGS_CACHE)
+        cache_data = torch.load(EMBEDDINGS_CACHE, map_location='cpu', weights_only=True)
         
         # Check if dreams file has been modified
         dream_file_mtime = os.path.getmtime(DREAMS_FILE) if os.path.exists(DREAMS_FILE) else 0
@@ -90,7 +90,10 @@ def load_cached_embeddings():
         if embeddings is None or len(embeddings) == 0:
             return None
             
-        return torch.tensor(embeddings)
+        # Ensure we return a proper tensor
+        if isinstance(embeddings, list):
+            return torch.tensor(embeddings)
+        return embeddings
     except Exception as e:
         logging.error(f"Error loading cached embeddings: {e}")
         return None
@@ -451,9 +454,18 @@ INSTRUCTIONS:
     
     return "\n".join(result_messages)
 
-def recall_dreams(query: str, top_k: int = 2, source_filter: str = None) -> list:
+def recall_dreams(query: str, top_k: int = 1, source_filter: str = None) -> list:
     """
-    Load and return relevant dreams based on the query.
+    Load and return the single most relevant dream based on the query.
+    Always returns just the top 1 match for simplicity.
+    
+    Args:
+        query (str): The search query to find relevant dream
+        top_k (int): Always returns 1 regardless of this value (kept for backwards compatibility)
+        source_filter (str, optional): Filter by dream source ("real", "synthetic", or None for any)
+        
+    Returns:
+        list: A list containing the single most relevant dream as a JSON string, or empty list if none found
     """
     global accessed_dreams
     
@@ -493,96 +505,35 @@ def recall_dreams(query: str, top_k: int = 2, source_filter: str = None) -> list
 
         # Get query embedding
         query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
-        query_embedding = torch.tensor(query_response["embedding"])
+        query_embedding = torch.tensor(query_response["embedding"], dtype=torch.float32)
 
-        # Calculate similarities
+        # Calculate similarities - ensure tensors are on the same device and have the same dtype
+        dream_embeddings_tensor = dream_embeddings_tensor.to(dtype=torch.float32)
         similarities = torch.cosine_similarity(
             query_embedding.unsqueeze(0),
             dream_embeddings_tensor,
             dim=1
         )
         
-        # Get top-k indices
-        if len(similarities) <= top_k:
-            top_k_indices = list(range(len(similarities)))
-        else:
-            top_k_indices = similarities.argsort(descending=True)[:top_k].tolist()
+        # Get top-1 index only
+        if len(similarities) == 0:
+            return []
         
-        # Ensure we don't have an index out of range error    
-        top_k_indices = [idx for idx in top_k_indices if idx < len(dreams)]
+        # Get the single most relevant dream
+        top_index = similarities.argmax().item()
         
-        # Track accessed dreams for potential updates
-        accessed_dreams.extend([dreams[idx].to_json() for idx in top_k_indices])
+        # Track accessed dream for potential updates
+        accessed_dreams.append(dreams[top_index].to_json())
         
         # Remove duplicates from accessed_dreams
         accessed_dreams = list(set(accessed_dreams))
         
-        relevant_dreams = [dreams[idx].to_json() for idx in top_k_indices]
-        return relevant_dreams
+        # Return as a list for backward compatibility
+        return [dreams[top_index].to_json()]
         
     except Exception as e:
         logging.error(f"Error in recall_dreams: {e}")
         return []
-
-def recall_dreams_hybrid(query: str, top_k: int = 3, real_ratio: float = 0.5) -> list:
-    """
-    Load and return relevant dreams with a blend of real and synthetic origins.
-    """
-    if not os.path.exists(DREAMS_FILE):
-        logging.warning(f"Dreams file {DREAMS_FILE} not found")
-        return []
-        
-    # Ensure real_ratio is within bounds
-    real_ratio = max(0.0, min(1.0, real_ratio))
-        
-    try:
-        # Calculate how many of each type to retrieve
-        real_count = max(1, int(top_k * real_ratio))
-        synthetic_count = max(1, top_k - real_count)
-        
-        # Get dreams from both sources
-        try:
-            real_dreams = recall_dreams(query, top_k=real_count, source_filter="real")
-        except Exception as e:
-            logging.error(f"Error recalling real dreams: {e}")
-            real_dreams = []
-            
-        try:
-            synthetic_dreams = recall_dreams(query, top_k=synthetic_count, source_filter="synthetic")
-        except Exception as e:
-            logging.error(f"Error recalling synthetic dreams: {e}")
-            synthetic_dreams = []
-        
-        # If we got no dreams of either type, try getting any dreams regardless of source
-        if not real_dreams and not synthetic_dreams:
-            logging.warning("No dreams found with specified sources, trying without source filter")
-            return recall_dreams(query, top_k=top_k)
-        
-        # Combine and return
-        combined_dreams = []
-        
-        # Interleave for better mixing (if we have both types)
-        if real_dreams and synthetic_dreams:
-            # Start with real for more grounded first response
-            for i in range(max(len(real_dreams), len(synthetic_dreams))):
-                if i < len(real_dreams):
-                    combined_dreams.append(real_dreams[i])
-                if i < len(synthetic_dreams):
-                    combined_dreams.append(synthetic_dreams[i])
-        else:
-            # Just append whatever we have
-            combined_dreams = real_dreams + synthetic_dreams
-            
-        return combined_dreams[:top_k]  # Ensure we don't exceed requested count
-        
-    except Exception as e:
-        logging.error(f"Error in recall_dreams_hybrid: {e}")
-        # Fallback to regular recall if hybrid fails
-        try:
-            return recall_dreams(query, top_k=top_k)
-        except Exception as e2:
-            logging.error(f"Fallback also failed: {e2}")
-            return []
 
 def remove_duplicate_dreams() -> str:
     """

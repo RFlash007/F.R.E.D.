@@ -23,42 +23,13 @@ from transformers import pipeline
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
 
-# --- ROUTING MODEL SETUP ---
-# We use the fine-tuned routing model "philschmid/modernbert-llm-router"
-# which is based on BERT-base and outputs multiple classes
 
-#Routing is broken due to 7b model not being able to handle the tool calls.
 def route_query(query: str) -> str:
     """
-    Routes the query to the appropriate model based on query complexity.
-    Uses a simple heuristic approach:
-    - Longer queries (>100 chars) or those with complex terms go to FRED_14b
-    - Shorter, simpler queries go to FRED_7b
+    Always returns FRED_14b as the model to use.
+    Model routing has been disabled to exclusively use 14b.
     """
-    try:
-        # List of terms that suggest complex queries
-        complex_terms = [
-            'explain', 'analyze', 'compare', 'design', 'implement',
-            'optimize', 'debug', 'architecture', 'system', 'framework'
-        ]
-        
-        # Check query complexity
-        is_complex = (
-            len(query) > 100 or
-            any(term in query.lower() for term in complex_terms)
-        )
-        
-        if is_complex:
-            print(f"Routing complex query to FRED_14b")
-            return "FRED_14b"
-        else:
-            print(f"Routing simple query to FRED_7b")
-            return "FRED_14b"
-            
-    except Exception as e:
-        print(f"Error in route_query: {str(e)}")
-        print(f"Error type: {type(e)}")
-        return "FRED_14b"
+    return "FRED_14b"
 
 conversation = []
 MAX_CONVERSATION_LENGTH = 5  # Adjust as needed
@@ -99,18 +70,8 @@ def process_message(user_input, ui_instance=None):
     start_time = datetime.now()
     episodic_memories = Episodic.recall_episodic(user_input)
     semantic_memories = Semantic.recall_semantic(user_input)
-    
-    # Use the hybrid recall mode for dreams - balancing real and synthetic dreams
-    # Adjust real_ratio based on query type for optimal results
-    if any(word in user_input.lower() for word in ['fact', 'specific', 'what did', 'history', 'remember', 'recall']):
-        # For factual/specific queries, prioritize real dreams
-        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.7)
-    elif any(word in user_input.lower() for word in ['imagine', 'creative', 'idea', 'possibility', 'future']):
-        # For creative/imaginative queries, prioritize synthetic dreams
-        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.3)
-    else:
-        # For balanced queries, use an even mix
-        dreams = Dreaming.recall_dreams_hybrid(user_input, top_k=3, real_ratio=0.5)
+    # Use the standard recall method for dreams - always returning the best single match
+    dreams = Dreaming.recall_dreams(user_input, top_k=1)
     
     elapsed_time = datetime.now() - start_time
     print(f"Memory recall took: {elapsed_time.total_seconds():.2f} seconds")
@@ -154,9 +115,9 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'search_and_summarize',
+                'name': 'search_web_information',
                 'description': (
-                    "Search for information and summarize the results. "
+                    "Search for EXTERNAL information from the web - NOT from F.R.E.D.'s internal memory. "
                     "Provides two modes: 'educational' for learning about topics, and 'news' for current events. "
                     "Use 'educational' mode for general knowledge and explanations. "
                     "Use 'news' mode for recent events and developments. "
@@ -167,12 +128,12 @@ def process_message(user_input, ui_instance=None):
                     'properties': {
                         'topics': {
                             'type': 'string',
-                            'description': 'Comma-separated topics to search for'
+                            'description': 'Comma-separated list of topics to search for.'
                         },
                         'mode': {
                             'type': 'string',
-                            'description': 'Search mode: "educational" (default) or "news"',
-                            'enum': ['educational', 'news']
+                            'enum': ['educational', 'news'],
+                            'description': 'The mode of summarization.'
                         }
                     },
                     'required': ['topics']
@@ -281,111 +242,14 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'create_project',
+                'name': 'list_notes',
                 'description': (
-                    "Create a new project directory."
+                    "List all available notes with their creation dates."
                 ),
                 'parameters': {
                     'type': 'object',
-                    'properties': {
-                        'project_name': {
-                            'type': 'string',
-                            'description': 'Name of the project to create'
-                        }
-                    },
-                    'required': ['project_name']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'edit_file_in_project',
-                'description': (
-                    "Edit a specific file within a project."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'project_name': {
-                            'type': 'string',
-                            'description': 'Name of the project'
-                        },
-                        'file_name': {
-                            'type': 'string',
-                            'description': 'Name of the file to edit'
-                        },
-                        'file_content': {
-                            'type': 'string',
-                            'description': 'A simple description of what the Python code should do. Do not include any code.'
-                        }
-                    },
-                    'required': ['project_name', 'file_name', 'file_content']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'read_file_in_project',
-                'description': (
-                    "Read a specific file within a project."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'project_name': {
-                            'type': 'string',
-                            'description': 'Name of the project'
-                        },
-                        'file_name': {
-                            'type': 'string',
-                            'description': 'Name of the file to read'
-                        }
-                    },
-                    'required': ['project_name', 'file_name']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'delete_project',
-                'description': (
-                    "Delete an entire project directory."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'project_name': {
-                            'type': 'string',
-                            'description': 'Name of the project to delete'
-                        }
-                    },
-                    'required': ['project_name']
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
-                'name': 'delete_file_in_project',
-                'description': (
-                    "Delete a specific file within a project."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'project_name': {
-                            'type': 'string',
-                            'description': 'Name of the project'
-                        },
-                        'file_name': {
-                            'type': 'string',
-                            'description': 'Name of the file to delete'
-                        }
-                    },
-                    'required': ['project_name', 'file_name']
+                    'properties': {},
+                    'required': []
                 }
             }
         },
@@ -433,20 +297,6 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'check_expired_tasks',
-                'description': (
-                    "Check for and delete tasks that are more than 3 days past their due date."
-                ),
-                'parameters': {
-                    'type': 'object',
-                    'properties': {},
-                    'required': []
-                }
-            }
-        },
-        {
-            'type': 'function',
-            'function': {
                 'name': 'delete_task',
                 'description': (
                     "Delete a task from the task list."
@@ -462,12 +312,62 @@ def process_message(user_input, ui_instance=None):
                     'required': ['task_title']
                 }
             }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'access_memory_database',
+                'description': (
+                    "Access F.R.E.D.'s internal memory databases (episodic, semantic, and dreams) to recall historical information. "
+                    "Use this for retrieving past conversations, stored facts, or AI insights - NOT for web searches. "
+                    "ALWAYS use this tool when the user asks about previous discussions or what F.R.E.D. remembers."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'query': {
+                            'type': 'string',
+                            'description': 'The search query to find relevant memories.'
+                        },
+                        'memory_type': {
+                            'type': 'string',
+                            'enum': ['episodic', 'semantic', 'dreams', 'all'],
+                            'description': 'The type of memory to search.'
+                        },
+                        'top_k': {
+                            'type': 'integer',
+                            'description': 'Number of results to return for each memory type.'
+                        }
+                    },
+                    'required': ['query']
+                }
+            }
+        },
+        {
+            'type': 'function',
+            'function': {
+                'name': 'get_morning_report',
+                'description': (
+                    "Generate a comprehensive morning report including weather, news, and tasks. "
+                    "This provides the same detailed briefing that F.R.E.D. automatically presents on startup."
+                ),
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'city': {
+                            'type': 'string',
+                            'description': 'The city to get weather information for. Defaults to Mechanicsville, VA if not specified.'
+                        }
+                    },
+                    'required': []
+                }
+            }
         }
     ]
 
     # 5. Determine which model to use.
     model_to_use = route_query(user_input)
-    print(f"Routing decision: using model {model_to_use} for input: {user_input}")
+    print(f"Using model {model_to_use} for query")
 
     # 6. Call the chosen model via Ollama.
     response = ollama.chat(
@@ -542,9 +442,10 @@ def chat_loop():
         morning_report = MorningReport.generate_morning_report()
         ui.display_message(morning_report, "assistant")
         voice_queue.put(f"Good morning, sir. I've prepared your daily briefing.")
+        conversation.append({"role": "assistant", "content": morning_report})
     except Exception as e:
         print(f"Error generating morning report: {str(e)}")
-
+    # Start the voice processing thread.
     try:
         # Start the voice processing thread.
         voice_thread = threading.Thread(target=process_voice_queue, daemon=True)
@@ -621,22 +522,16 @@ if __name__ == "__main__":
     
     print(f"Initialization took: {datetime.now() - time_start}")
 
-    # Define separate modelfiles.
+    # Define modelfile.
     modelfile_14b = f'''
 FROM huihui_ai/qwen2.5-abliterate:14b
 SYSTEM {final_prompt}
 PARAMETER num_ctx 8192
 '''
-    modelfile_7b = f'''
-FROM huihui_ai/qwen2.5-abliterate:7b
-SYSTEM {final_prompt}
-PARAMETER num_ctx 8192
-'''
-
+    print(final_prompt)
     try:
-        # Create the two models with distinct modelfiles.
+        # Create the model with modelfile.
         ollama.create(model='FRED_14b', modelfile=modelfile_14b)
-        ollama.create(model='FRED_7b', modelfile=modelfile_7b)
         # Start the main chat loop.
         chat_loop()
     except Exception as e:

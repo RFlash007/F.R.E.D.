@@ -297,12 +297,14 @@ def recall_semantic(query: str, top_k: int = 2) -> list:
 
         # Get query embedding
         query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
-        query_embedding = torch.tensor(query_response["embedding"])
+        query_embedding = torch.tensor(query_response["embedding"], dtype=torch.float32)
 
-        # Calculate similarities
+        # Calculate similarities - ensure tensors are on the same device and have the same dtype
+        fact_embeddings_tensor = fact_embeddings_tensor.to(dtype=torch.float32)
         similarities = torch.cosine_similarity(
             query_embedding.unsqueeze(0),
-            fact_embeddings_tensor
+            fact_embeddings_tensor,
+            dim=1
         )
 
         # Get top-k most relevant facts
@@ -362,7 +364,7 @@ def remove_duplicate_semantic():
         return f"Error: {str(e)}"
 
 
-def consolidate_semantic(similarity_threshold: float = 0.99) -> str:
+def consolidate_semantic(similarity_threshold: float = 0.90) -> str:
     """
     Consolidate similar semantic facts based on a similarity threshold.
     1. Remove exact duplicates first.

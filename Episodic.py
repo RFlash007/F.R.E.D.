@@ -368,12 +368,14 @@ def recall_episodic(query: str, top_k: int = 1) -> list:
 
         # Get query embedding
         query_response = ollama.embeddings(model='nomic-embed-text', prompt=query)
-        query_embedding = torch.tensor(query_response["embedding"])
+        query_embedding = torch.tensor(query_response["embedding"], dtype=torch.float32)
 
-        # Calculate similarities
+        # Calculate similarities - ensure tensors are on the same device and have the same dtype
+        episode_embeddings_tensor = episode_embeddings_tensor.to(dtype=torch.float32)
         similarities = torch.cosine_similarity(
             query_embedding.unsqueeze(0),
-            episode_embeddings_tensor
+            episode_embeddings_tensor,
+            dim=1
         )
 
         # Get top-k most relevant episodes

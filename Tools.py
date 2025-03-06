@@ -8,8 +8,6 @@ import psutil
 import GPUtil
 from duckduckgo_search import DDGS
 
-import Projects
-
 logging.basicConfig(level=logging.ERROR)
 
 def get_time() -> str:
@@ -20,9 +18,10 @@ def get_time() -> str:
     return time.strftime("%I:%M:%S %p, %d %B %Y", time.localtime(current_time))
 
 
-def search_and_summarize(topics: str, mode: str = "educational") -> str:
+def search_web_information(topics: str, mode: str = "educational") -> str:
     """
-    Unified function to perform DuckDuckGo-based search and summarization.
+    Searches for EXTERNAL information from the web using DuckDuckGo.
+    This tool retrieves current information from the internet - NOT from F.R.E.D.'s memory.
     
     1. Perform text & news searches on each topic (comma-separated).
     2. Summarize the combined results in the specified style.
@@ -137,23 +136,83 @@ def get_system_status() -> str:
     return "\n".join(report)
 
 
+def access_memory_database(query: str, memory_type: str = "all", top_k: int = 2) -> str:
+    """
+    Access F.R.E.D.'s internal memory databases based on the provided query.
+    This tool searches through episodic memories, semantic knowledge, and dream insights
+    stored within the system - NOT external web information.
+    
+    Args:
+        query (str): The search query to find relevant memories
+        memory_type (str): Type of memory to search - "episodic", "semantic", "dreams", or "all"
+        top_k (int): Number of results to return for each memory type
+        
+    Returns:
+        str: Formatted results of the memory search
+    """
+    import Episodic
+    import Semantic
+    import Dreaming
+    
+    results = []
+    
+    if memory_type.lower() in ["episodic", "all"]:
+        try:
+            episodic_results = Episodic.recall_episodic(query, top_k=top_k)
+            if episodic_results:
+                results.append("## Episodic Memories")
+                for i, memory in enumerate(episodic_results, 1):
+                    results.append(f"{i}. {memory['content']}")
+                results.append("")
+        except Exception as e:
+            results.append(f"Error searching episodic memory: {str(e)}")
+    
+    if memory_type.lower() in ["semantic", "all"]:
+        try:
+            semantic_results = Semantic.recall_semantic(query, top_k=top_k)
+            if semantic_results:
+                results.append("## Semantic Knowledge")
+                for i, fact in enumerate(semantic_results, 1):
+                    results.append(f"{i}. {fact['content']}")
+                results.append("")
+        except Exception as e:
+            results.append(f"Error searching semantic memory: {str(e)}")
+    
+    if memory_type.lower() in ["dreams", "all"]:
+        try:
+            # Use standard recall which now always returns the top match
+            dream_results = Dreaming.recall_dreams(query, top_k=1)
+                
+            if dream_results:
+                results.append("## Dream Insights")
+                for i, dream in enumerate(dream_results, 1):
+                    results.append(f"{i}. {dream['content']}")
+                results.append("")
+        except Exception as e:
+            results.append(f"Error searching dream memory: {str(e)}")
+    
+    if not results:
+        return f"No relevant memories found for query: '{query}'"
+    
+    if all(r.startswith("Error") for r in results if r):
+        return f"Errors occurred while searching memory: \n" + "\n".join([r for r in results if r])
+    
+    return "\n".join(results)
+
+
 available_functions = {
-    'search_and_summarize': search_and_summarize,
+    'search_web_information': search_web_information,
     'get_system_status': get_system_status,
     'create_note': Task.create_note,
     'update_note': Task.update_note,
     'delete_note': Task.delete_note,
     'read_note': Task.read_note,
-    'create_project': Projects.create_project,
-    'delete_project': Projects.delete_project,
-    'delete_file_in_project': Projects.delete_file_in_project,
-    'read_file_in_project': Projects.read_file_in_project,
-    'edit_file_in_project': Projects.edit_file_in_project,
+    'list_notes': Task.list_notes,
     'add_task': Task.add_task,
     'delete_task': Task.delete_task,
     'list_tasks': Task.list_tasks,
-    'check_expired_tasks': Task.check_expired_tasks,
     'morning_report': MorningReport.generate_morning_report,
+    'access_memory_database': access_memory_database,
 }
 
 
@@ -225,7 +284,7 @@ def handle_tool_calls(response, user_input):
 
     # Function parameter configurations
     param_configs = {
-        'search_and_summarize': {
+        'search_web_information': {
             'required': ['topics'],
             'transforms': {}
         },
@@ -249,26 +308,6 @@ def handle_tool_calls(response, user_input):
             'required': ['note_title'],
             'transforms': {'note_title': str.lower}
         },
-        'create_project': {
-            'required': ['project_name'],
-            'transforms': {'project_name': str.lower}
-        },
-        'delete_project': {
-            'required': ['project_name'],
-            'transforms': {'project_name': str.lower}
-        },
-        'delete_file_in_project': {
-            'required': ['project_name', 'file_name'],
-            'transforms': {'project_name': str.lower, 'file_name': str.lower}
-        },
-        'read_file_in_project': {
-            'required': ['project_name', 'file_name'],
-            'transforms': {'project_name': str.lower, 'file_name': str.lower}
-        },
-        'edit_file_in_project': {
-            'required': ['project_name', 'file_name', 'file_content'],
-            'transforms': {'project_name': str.lower, 'file_name': str.lower}
-        },
         'add_task': {
             'required': ['task_title', 'task_content'],
             'transforms': {}
@@ -281,12 +320,12 @@ def handle_tool_calls(response, user_input):
             'required': [],
             'transforms': {}
         },
-        'check_expired_tasks': {
+        'morning_report': {
             'required': [],
             'transforms': {}
         },
-        'morning_report': {
-            'required': [],
+        'access_memory_database': {
+            'required': ['query'],
             'transforms': {}
         },
     }
@@ -303,7 +342,7 @@ def handle_tool_calls(response, user_input):
             continue
             
         # Special case for search functions
-        if function_name in ('search_and_summarize', 'get_system_status'):
+        if function_name in ('search_web_information', 'get_system_status'):
             # Default to user input if topics not provided
             if 'topics' not in tool_args:
                 tool_args['topics'] = user_input
