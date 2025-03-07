@@ -3,10 +3,19 @@ import time
 import logging
 import Task
 import MorningReport
+import subprocess
+import platform
 
 import psutil
 import GPUtil
 from duckduckgo_search import DDGS
+import Semantic
+import Episodic
+import Dreaming
+import Vision
+import ollama
+import base64
+import cv2
 
 logging.basicConfig(level=logging.ERROR)
 
@@ -150,10 +159,6 @@ def access_memory_database(query: str, memory_type: str = "all", top_k: int = 2)
     Returns:
         str: Formatted results of the memory search
     """
-    import Episodic
-    import Semantic
-    import Dreaming
-    
     results = []
     
     if memory_type.lower() in ["episodic", "all"]:
@@ -200,6 +205,151 @@ def access_memory_database(query: str, memory_type: str = "all", top_k: int = 2)
     return "\n".join(results)
 
 
+def get_sight() -> str:
+    """
+    Retrieve information about what FRED can currently see through the vision system.
+    Uses Llama3.2-Vision via Ollama to provide an intelligent description of the camera feed.
+    
+    Returns:
+        str: AI-powered description of what the camera sees
+    """
+    if not Vision.is_vision_active():
+        return "Vision system is not active. Unable to provide visual information."
+    
+    # Get the current frame from the vision system
+    frame = Vision.get_current_frame()
+    if frame is None:
+        return "Unable to capture a frame from the vision system."
+    
+    try:
+        # Save the frame to a temporary file
+        import tempfile
+        import os
+        
+        # Create a temporary file with .jpg extension
+        temp_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+        temp_filepath = temp_file.name
+        temp_file.close()
+        
+        # Save the frame to the temporary file
+        cv2.imwrite(temp_filepath, frame)
+        
+        try:
+            # Call Llama3.2-Vision via Ollama with correct format
+            response = ollama.chat(
+                model="FRED_vision",
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': 'Describe this image in detail, focusing on objects, their positions, and any interactions visible.',
+                        'images': [temp_filepath]
+                    }
+                ],
+                stream=False
+            )
+            
+            vision_description = response["message"]["content"]
+            logging.info(f"Vision description successfully generated: {vision_description[:50]}...")
+            
+        finally:
+            # Clean up the temporary file
+            try:
+                os.unlink(temp_filepath)
+            except Exception as e:
+                logging.error(f"Error removing temporary file: {str(e)}")
+        
+        # Also include traditional object detection results
+        detections = Vision.get_current_detections()
+        if detections:
+            object_counts = {}
+            for obj in detections:
+                label = obj['label']
+                if label in object_counts:
+                    object_counts[label] += 1
+                else:
+                    object_counts[label] = 1
+            
+            detection_result = "\n\nObject detection system reports: "
+            items = []
+            for label, count in object_counts.items():
+                if count > 1:
+                    items.append(f"{count} {label}s")
+                else:
+                    items.append(f"1 {label}")
+            
+            detection_result += ", ".join(items)
+            
+            return f"{vision_description}{detection_result}"
+        
+        return vision_description
+        
+    except Exception as e:
+        logging.error(f"Error processing vision with Llama3.2-Vision: {str(e)}")
+        
+        # Fall back to regular object detection if AI vision fails
+        detections = Vision.get_current_detections()
+        
+        if not detections:
+            return "I don't see any recognizable objects at the moment."
+        
+        # Format the detection results
+        result = "I can currently see the following objects:\n"
+        
+        # Group similar objects for cleaner reporting
+        object_counts = {}
+        for obj in detections:
+            label = obj['label']
+            if label in object_counts:
+                object_counts[label] += 1
+            else:
+                object_counts[label] = 1
+        
+        # Format the grouped results
+        items = []
+        for label, count in object_counts.items():
+            if count > 1:
+                items.append(f"{count} {label}s")
+            else:
+                items.append(f"1 {label}")
+        
+        result += ", ".join(items)
+        
+        # Add a summary of the most prominent objects
+        result += "\n\nThe most prominent objects in view are: "
+        sorted_objects = sorted(
+            [(label, count, max([obj['confidence'] for obj in detections if obj['label'] == label])) 
+             for label, count in object_counts.items()],
+            key=lambda x: x[2],  # Sort by confidence
+            reverse=True
+        )
+        
+        if sorted_objects:
+            prominent = [f"{label} ({confidence*100:.1f}% confidence)" 
+                        for label, _, confidence in sorted_objects[:3]]
+            result += ", ".join(prominent)
+        
+        # Add information about detected persons
+        persons = [obj for obj in detections if obj['label'].lower() == 'person']
+        if persons:
+            result += f"\n\nI can see {len(persons)} {'person' if len(persons) == 1 else 'people'} in the frame."
+
+        # Add information about electronics
+        electronics = [obj['label'] for obj in detections 
+                      if obj['label'].lower() in ['laptop', 'tv', 'cell phone', 'remote', 'keyboard', 'mouse', 'monitor']]
+        if electronics:
+            result += f"\n\nI can see the following electronics: {', '.join(set(electronics))}."
+            
+        # Add information about potential text
+        documents = [obj['label'] for obj in detections 
+                    if obj['label'].lower() in ['book', 'cell phone', 'laptop', 'tv', 'remote']]
+        if documents:
+            result += f"\n\nThere may be text visible on the following objects: {', '.join(set(documents))}. "
+            result += "You can ask me to attempt text recognition if needed."
+        
+        return result + "\n\n(Note: AI vision description failed, using fallback object detection)"
+
+
+
 available_functions = {
     'search_web_information': search_web_information,
     'get_system_status': get_system_status,
@@ -211,8 +361,8 @@ available_functions = {
     'add_task': Task.add_task,
     'delete_task': Task.delete_task,
     'list_tasks': Task.list_tasks,
-    'morning_report': MorningReport.generate_morning_report,
     'access_memory_database': access_memory_database,
+    'get_sight': get_sight,
 }
 
 
@@ -317,10 +467,6 @@ def handle_tool_calls(response, user_input):
             'transforms': {}
         },
         'list_tasks': {
-            'required': [],
-            'transforms': {}
-        },
-        'morning_report': {
             'required': [],
             'transforms': {}
         },

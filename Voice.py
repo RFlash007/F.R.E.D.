@@ -20,11 +20,11 @@ def cleanup_output_file(output_file, delay=1):
         if os.path.exists(output_file):
             os.remove(output_file)
     except Exception as e:
-        print(f"Warning: Could not cleanup output file: {e}")
+        # Suppress the warning message
+        pass
 
 def piper_speak(text, model_path=None, output_file=None):
     if not text.strip():
-        print("Warning: Empty text provided")
         return False
         
     with piper_lock:
@@ -35,7 +35,6 @@ def piper_speak(text, model_path=None, output_file=None):
             
             # Verify files exist
             if not os.path.exists(PIPER_EXE):
-                print(f"Error: Piper executable not found at {PIPER_EXE}")
                 return False
                 
             if not os.path.exists(model):

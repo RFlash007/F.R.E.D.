@@ -7,6 +7,7 @@ import Voice
 import Semantic
 import Procedural
 import Episodic
+import Vision
 from ChatUI import ChatUI
 import threading
 from queue import Queue
@@ -61,11 +62,133 @@ def save_conversation(conversation_history):
         print(f"Error saving conversation history: {str(e)}")
         return False
 
+def toggle_vision(command, ui_instance=None):
+    """
+    Toggle the vision system on/off based on the command.
+    Returns a response message.
+    """
+    import Vision
+    
+    command = command.lower().strip()
+    
+    if command == "on":
+        if Vision.is_vision_active():
+            return "Vision system is already active, sir."
+        
+        try:
+            vision_initialized = Vision.initialize_vision(show_window=True)
+            if vision_initialized:
+                return "Vision system online, sir. I can now see through your camera."
+            else:
+                return "Warning: I was unable to initialize the vision system."
+        except Exception as e:
+            return f"Error initializing vision system: {str(e)}"
+            
+    elif command == "off" or command == "disable":
+        if not Vision.is_vision_active():
+            return "Vision system is already offline, sir."
+        
+        try:
+            Vision.stop_vision_system()
+            return "Vision system has been disabled, sir. Your privacy is restored."
+        except Exception as e:
+            return f"Error disabling vision system: {str(e)}"
+            
+    elif command == "status":
+        if Vision.is_vision_active():
+            return "Vision system is currently active and operational, sir."
+        else:
+            return "Vision system is currently offline, sir."
+    
+    elif command == "toggle":
+        if Vision.is_vision_active():
+            Vision.stop_vision_system()
+            return "Vision system has been disabled, sir."
+        else:
+            vision_initialized = Vision.initialize_vision(show_window=True)
+            if vision_initialized:
+                return "Vision system online, sir."
+            else:
+                return "Warning: I was unable to initialize the vision system."
+    
+    return "Invalid vision command. Available commands: on, off, disable, status, toggle"
+
+def identify_person(command, ui_instance=None):
+    """
+    Identify a person in the camera view with a name.
+    
+    Args:
+        command (str): The command containing the person's name
+        ui_instance (ChatUI, optional): The UI instance for displaying messages
+        
+    Returns:
+        str: Response message
+    """
+    # Extract the person's name from the command
+    name = command.strip()
+    
+    if not name:
+        return "Please provide a valid name for the person."
+    
+    # Call the vision system to identify the face
+    response = Vision.identify_face(name)
+    return response
+
 def process_message(user_input, ui_instance=None):
     """
     Process a single message and return the response from the model.
     If the user says "goodbye", summarize the conversation, update memories, and shut down.
     """
+    # Check for vision system commands - process silently without UI messages
+    if user_input.lower().startswith("/vision "):
+        command = user_input.lower().replace("/vision ", "").strip()
+        response = toggle_vision(command, ui_instance)
+        
+        # Only speak the response, don't display in UI
+        Voice.piper_speak(response)
+        return
+    
+    # Check for identify person command
+    if user_input.lower().startswith("/identify "):
+        response = identify_person(user_input.lower().replace("/identify ", "").strip(), ui_instance)
+        
+        # Display and speak concise response
+        concise_response = response.split(".")[0] + "." if "." in response else response
+        Voice.piper_speak(concise_response)
+        return
+    
+    # Check for list faces command
+    if user_input.lower() == "/faces" or user_input.lower() == "list faces":
+        response = Vision.list_known_faces()
+        
+        # Display and speak the response
+        if ui_instance:
+            ui_instance.display_message(f"F.R.E.D.: {response}", "assistant")
+        Voice.piper_speak(response.replace("\n-", ". ").replace(":\n", ": "))
+        return
+    
+    # Check for natural language identification patterns when vision is active
+    if Vision.is_vision_active():
+        input_lower = user_input.lower()
+        name = None
+        
+        # Pattern: "That's [Name]" or "This is [Name]"
+        if input_lower.startswith("that's ") or input_lower.startswith("that is "):
+            name = user_input[input_lower.find(" ") + 1:].strip()
+        elif input_lower.startswith("this is "):
+            name = user_input[8:].strip()
+        
+        # If we found a name pattern and vision is active, try to identify the person
+        if name:
+            response = Vision.identify_face(name)
+            
+            # Display and speak concise response
+            concise_response = response.split(".")[0] + "." if "." in response else response
+            if ui_instance:
+                ui_instance.display_message(f"F.R.E.D.: {concise_response}", "assistant")
+            Voice.piper_speak(concise_response)
+            return
+        
     # 1. Recall episodic and semantic memories.
     start_time = datetime.now()
     episodic_memories = Episodic.recall_episodic(user_input)
@@ -74,7 +197,7 @@ def process_message(user_input, ui_instance=None):
     dreams = Dreaming.recall_dreams(user_input, top_k=1)
     
     elapsed_time = datetime.now() - start_time
-    print(f"Memory recall took: {elapsed_time.total_seconds():.2f} seconds")
+    # Removed print statement for memory recall time
     
     # 2. If the user says "goodbye", finalize conversation.
     if user_input.lower() == "goodbye":
@@ -106,8 +229,10 @@ def process_message(user_input, ui_instance=None):
         f"These are your memories that may help answer the user's question. Reference them only if directly helpful:\n{episodic_memories}\n\n"
         f"Here are facts from your memory. Reference them only if directly helpful:\n{semantic_memories}\n"
         f"These are your dreams and insights. Reference them only if directly helpful:\n{dreams}\n"
-        "(END OF FRED DATABASE)"
     )
+    
+    user_prompt += "(END OF FRED DATABASE)"
+    
     conversation.append({"role": "user", "content": user_prompt})
 
     # 4. Define tool schemas (unchanged from your original script)
@@ -346,23 +471,21 @@ def process_message(user_input, ui_instance=None):
         {
             'type': 'function',
             'function': {
-                'name': 'get_morning_report',
+                'name': 'get_sight',
                 'description': (
-                    "Generate a comprehensive morning report including weather, news, and tasks. "
-                    "This provides the same detailed briefing that F.R.E.D. automatically presents on startup."
+                    "Get information about what F.R.E.D. can currently see through the vision system. "
+                    "Use this tool when the user asks about what you can see, what objects are visible, "
+                    "or when visual identification is requested. This accesses the webcam feed with real-time "
+                    "object detection."
                 ),
                 'parameters': {
                     'type': 'object',
                     'properties': {
-                        'city': {
-                            'type': 'string',
-                            'description': 'The city to get weather information for. Defaults to Mechanicsville, VA if not specified.'
-                        }
                     },
                     'required': []
                 }
             }
-        }
+        },
     ]
 
     # 5. Determine which model to use.
@@ -437,9 +560,21 @@ def chat_loop():
     voice_system = initialize_voice_system(lambda msg: process_message(msg, ui))
     voice_system.set_ui(ui)
     
+    # Initialize the vision system
+    try:
+        vision_initialized = Vision.initialize_vision(show_window=True)
+        if vision_initialized:
+            voice_queue.put("Vision system online, sir. I can now see through your camera.")
+        else:
+            voice_queue.put("Warning: I was unable to initialize the vision system.")
+    except Exception as e:
+        # Empty exception handler - silently ignore errors
+        pass
+    
     # Generate morning report when AI starts
     try:
         morning_report = MorningReport.generate_morning_report()
+        # Remove UI display of morning report
         ui.display_message(morning_report, "assistant")
         voice_queue.put(f"Good morning, sir. I've prepared your daily briefing.")
         conversation.append({"role": "assistant", "content": morning_report})
@@ -454,6 +589,10 @@ def chat_loop():
     except KeyboardInterrupt:
         print("\nShutting down...")
     finally:
+        # Stop the vision system
+        if Vision.is_vision_active():
+            Vision.stop_vision_system()
+            print("Vision system stopped.")
         voice_system.stop()
         print("Voice system stopped.")
         sys.exit(0)
@@ -528,10 +667,33 @@ FROM huihui_ai/qwen2.5-abliterate:14b
 SYSTEM {final_prompt}
 PARAMETER num_ctx 8192
 '''
-    print(final_prompt)
+
+    # Load vision system prompt from file
+    vision_prompt_file = "vision_prompt.txt"
     try:
-        # Create the model with modelfile.
+        with open(vision_prompt_file, 'r') as f:
+            vision_prompt = f.read()
+            vision_prompt = vision_prompt.replace('\n', ' ')  # Format for modelfile
+    except Exception as e:
+        print(f"Error loading vision prompt file: {str(e)}")
+        vision_prompt = "Describe the image with neutral, detailed precision."
+
+    # Define vision modelfile
+    modelfile_vision = f'''
+FROM llama3.2-vision:latest
+SYSTEM {vision_prompt}
+PARAMETER num_ctx 4096
+'''
+
+    try:
+        # Create the FRED model with modelfile
         ollama.create(model='FRED_14b', modelfile=modelfile_14b)
+        
+        # Create the vision model with modelfile
+        print("Creating vision model...")
+        ollama.create(model='FRED_vision', modelfile=modelfile_vision)
+        print("Vision model created successfully")
+        
         # Start the main chat loop.
         chat_loop()
     except Exception as e:

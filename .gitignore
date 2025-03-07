@@ -55,3 +55,12 @@ Notes/
 dist/
 build/
 *.egg-info/
+
+*.weights
+*.pt
+*.pth
+*.pth.tar
+*.pth.tar.gz
+*.pth.tar.bz2
+*.pth.tar.xz
+*.pth.tar.lzma

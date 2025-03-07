@@ -78,7 +78,6 @@ class VoiceTranscriber:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "float32"
         self.model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        print(f"Model initialized on {device} using {compute_type}")
 
     def audio_callback(self, indata, frames, time_info, status):
         """Callback function for audio stream"""
@@ -254,7 +253,7 @@ class VoiceTranscriber:
             self.is_running = False
             self.is_listening = False
 
-    def callback(self, text):
+    def process_callback(self, text):
         """Enhanced callback to handle speaking state"""
         self.is_speaking = True
         response = self.callback(text)

@@ -20,6 +20,42 @@ F.R.E.D. provides an automatic morning report each time you start the applicatio
 
 This ensures you're always up-to-date with essential information without having to ask.
 
+## Vision System
+
+F.R.E.D. is equipped with a computer vision system using the state-of-the-art YOLOv8s model that provides visual awareness through your webcam:
+
+- **Object Detection**: Identifies over 600 types of objects using the Open Images V7 dataset with improved accuracy (upgraded from YOLOv8n)
+- **Object Tracking**: Maintains persistent tracking of objects between frames with unique identifiers
+- **Person Detection & Recognition**: Identifies people with high accuracy and remembers faces with custom naming
+- **Face Database**: Stores identified faces in a SQLite database for automatic recognition in future sessions
+- **Motion Analysis**: Tracks object movements and calculates simple velocity data for moving objects
+- **Real-time Processing**: Analyzes the visual feed continuously while active
+- **Comprehensive Summaries**: Provides object lists with confidence scores, counts, and contextual information
+
+### Vision Architecture
+
+The vision system employs a two-stage architecture for comprehensive scene understanding:
+1. **Objective Description Layer**: Uses a dedicated LLM (FRED_vision model) to produce neutral, precise descriptions focusing on spatial relationships and object properties
+2. **FRED Personality Layer**: Interprets the neutral descriptions through FRED's characteristic British humor and sarcasm
+
+This separation ensures reliable object detection while maintaining FRED's distinctive tone in responses.
+
+### Upcoming Vision Features
+
+The vision system is continuously evolving with planned enhancements including:
+- Voice-activated visual searches and object queries
+- Enhanced information display with smart annotations for objects
+- Advanced text recognition with multi-language translation (planned for future release)
+- Document scanning and analysis capabilities (planned for future release)
+
+To use the vision system, simply ask questions like:
+- "What can you see right now?"
+- "What objects are in front of you?"
+- "Describe what you're looking at."
+- "Do you recognize anyone in the camera?"
+
+The vision system automatically initializes when F.R.E.D. starts up.
+
 ## Memory Systems
 
 F.R.E.D. uses three types of memory:
@@ -60,6 +96,12 @@ You: Search for the latest news about AI.
 F.R.E.D.: *finds and summarizes news, possibly with commentary*
 ```
 
+**Vision Queries**
+```
+You: What objects can you see?
+F.R.E.D.: *describes objects detected in the camera view with characteristic dry wit*
+```
+
 **Managing Tasks**
 ```
 You: Add a task to call my dentist tomorrow with a due date next Friday.
@@ -75,7 +117,7 @@ F.R.E.D. can help you with:
 - **Notes**: Creating and managing notes
 - **Tasks**: Tracking your to-do list with due dates (old tasks are automatically cleaned up)
 - **System Status**: Monitoring your computer's performance
-- **Morning Report**: Providing daily summaries of weather, news, and tasks
+- **Vision**: Identifying and describing objects through the webcam
 
 ### Memory Management
 
@@ -94,6 +136,7 @@ F.R.E.D. automatically manages memories, but you can:
 4. **Use the tools** for organizing information and tasks
 5. **Trust the automatic task management** - tasks older than 3 days past their due date are automatically cleaned up on startup
 6. **Provide feedback** when F.R.E.D. misunderstands you
+7. **Ask about your surroundings** to leverage the vision system
 
 ## Common Commands
 
@@ -107,6 +150,7 @@ F.R.E.D. automatically manages memories, but you can:
 | List your tasks | "List my tasks" or "Show my tasks" |
 | Delete a task | "Delete task..." |
 | Check system status | "How's my system doing?" |
+| Check what F.R.E.D. can see | "What do you see?" or "What objects are in view?" |
 | End a session | "Goodbye" |
 
 ---
