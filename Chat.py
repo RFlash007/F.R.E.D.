@@ -65,6 +65,11 @@ def save_conversation(conversation_history):
 def toggle_vision(command, ui_instance=None):
     """
     Toggle the vision system on/off based on the command.
+    Commands:
+        on - Activate vision system
+        off/disable - Deactivate vision system
+        status - Check vision system status
+        toggle - Toggle current vision system state
     Returns a response message.
     """
     import Vision
@@ -138,6 +143,11 @@ def process_message(user_input, ui_instance=None):
     """
     Process a single message and return the response from the model.
     If the user says "goodbye", summarize the conversation, update memories, and shut down.
+    
+    Special commands:
+    - /vision [on|off|disable|status|toggle] - Control the vision system
+    - /identify [name] - Identify a person in the camera view
+    - /faces - List all known faces
     """
     # Check for vision system commands - process silently without UI messages
     if user_input.lower().startswith("/vision "):

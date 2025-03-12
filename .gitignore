@@ -64,3 +64,15 @@ build/
 *.pth.tar.bz2
 *.pth.tar.xz
 *.pth.tar.lzma
+*.db
+*.dll
+*.so
+*.dylib
+*.lib
+*.exp
+*.def
+*.safetensors
+*.bin
+*.tfevents.*
+faces*
+

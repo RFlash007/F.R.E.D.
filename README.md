@@ -1,158 +1,184 @@
 # F.R.E.D. - Frankly Rude Educated Droid
 
-A conversational AI assistant that remembers your interactions and occasionally delivers information with attitude.
+## Overview
+F.R.E.D. is an advanced AI assistant combining conversational intelligence with computer vision capabilities. Built with Python, it integrates multiple AI models and systems to provide comprehensive assistance.
 
-## What is F.R.E.D.?
+## Core Features
 
-F.R.E.D. is an AI assistant that learns from your conversations, maintains context between sessions, and provides personalized assistance with a touch of sass. Unlike standard assistants, F.R.E.D. remembers what you've discussed before and becomes more helpful (though not necessarily more polite) over time.
+### Vision System
+- **Object Detection**: YOLOv8s model identifies 600+ objects
+- **Face Recognition**: Custom facial embedding system with SQLite storage
+- **Object Tracking**: Persistent tracking with unique IDs
+- **Real-time Processing**: Continuous camera feed analysis
+- **Two-stage Architecture**:
+  1. Objective Description Layer (neutral descriptions)
+  2. Personality Layer (FRED's characteristic tone)
 
-## Daily Briefing
+### Memory Systems
+- **Semantic Memory**: Stores facts and information
+- **Episodic Memory**: Remembers conversations and interactions
+- **Dreaming**: Develops insights about user preferences
+- **Face Database**: Persistent storage of facial embeddings and metadata
 
-F.R.E.D. provides an automatic morning report each time you start the application, including:
+### Daily Operations
+- Automatic morning briefing
+- Task management with auto-cleanup
+- News summarization
+- System monitoring
 
-- **Current Weather**: Temperature, conditions, and forecast for your location
-- **Task Management**: F.R.E.D. automatically cleans up your task list on startup by removing any task more than 3 days past its due date, then shows your current active tasks
-- **News Summaries**: Curated news in several categories:
-  - World News
-  - Technology News
-  - AI Industry News
-  - General Headlines
+## Technical Architecture
 
-This ensures you're always up-to-date with essential information without having to ask.
+### Core Modules
 
-## Vision System
+1. **Vision System (Vision.py)**
+   - YOLOv8 integration for object detection
+   - Face detection and cropping
+   - Object tracking with history
+   - Camera feed processing
+   - Detection threshold management
+   - Tracker cleanup and maintenance
 
-F.R.E.D. is equipped with a computer vision system using the state-of-the-art YOLOv8s model that provides visual awareness through your webcam:
+2. **Face Recognition (FaceRecognition.py)**
+   - Facial embedding extraction
+   - Face matching with cosine similarity
+   - Embedding cache system
+   - Face record updates
+   - Similarity threshold management
 
-- **Object Detection**: Identifies over 600 types of objects using the Open Images V7 dataset with improved accuracy (upgraded from YOLOv8n)
-- **Object Tracking**: Maintains persistent tracking of objects between frames with unique identifiers
-- **Person Detection & Recognition**: Identifies people with high accuracy and remembers faces with custom naming
-- **Face Database**: Stores identified faces in a SQLite database for automatic recognition in future sessions
-- **Motion Analysis**: Tracks object movements and calculates simple velocity data for moving objects
-- **Real-time Processing**: Analyzes the visual feed continuously while active
-- **Comprehensive Summaries**: Provides object lists with confidence scores, counts, and contextual information
+3. **Database Management (FaceDB.py)**
+   - SQLite database operations
+   - Face record storage and retrieval
+   - Embedding serialization
+   - Bounding box storage
+   - Timestamp management
+   - Image file storage
 
-### Vision Architecture
+4. **Chat Interface (Chat.py)**
+   - Command processing
+   - Face identification commands
+   - Response generation
+   - Error handling
+   - User interaction management
 
-The vision system employs a two-stage architecture for comprehensive scene understanding:
-1. **Objective Description Layer**: Uses a dedicated LLM (FRED_vision model) to produce neutral, precise descriptions focusing on spatial relationships and object properties
-2. **FRED Personality Layer**: Interprets the neutral descriptions through FRED's characteristic British humor and sarcasm
+5. **Tool Integration (Tools.py)**
+   - Vision system access
+   - Object detection summaries
+   - Detection result formatting
+   - Error handling and fallbacks
+   - Prominent object identification
 
-This separation ensures reliable object detection while maintaining FRED's distinctive tone in responses.
+### Key Data Structures
 
-### Upcoming Vision Features
+- **Face Records**
+  - name: String
+  - bbox: Tuple (x1, y1, x2, y2)
+  - last_seen: Timestamp
+  - embedding: Numpy array
+  - image_path: String
 
-The vision system is continuously evolving with planned enhancements including:
-- Voice-activated visual searches and object queries
-- Enhanced information display with smart annotations for objects
-- Advanced text recognition with multi-language translation (planned for future release)
-- Document scanning and analysis capabilities (planned for future release)
+- **Object Detections**
+  - label: String
+  - confidence: Float
+  - bbox: Tuple (x1, y1, x2, y2)
+  - tracker_id: UUID
 
-To use the vision system, simply ask questions like:
-- "What can you see right now?"
-- "What objects are in front of you?"
-- "Describe what you're looking at."
-- "Do you recognize anyone in the camera?"
+- **Trackers**
+  - label: String
+  - bbox: Tuple (x1, y1, x2, y2)
+  - last_seen: Timestamp
+  - history: Deque of positions
+  - frames_since_detection: Int
 
-The vision system automatically initializes when F.R.E.D. starts up.
+### Threading Model
 
-## Memory Systems
+- **Main Thread**
+  - Handles user interaction
+  - Processes commands
+  - Manages UI updates
 
-F.R.E.D. uses three types of memory:
+- **Vision Thread**
+  - Continuous camera feed processing
+  - Object detection and tracking
+  - Face recognition
+  - Frame analysis
 
-### Semantic Memory
-Stores facts and information
-```
-"Python is a high-level programming language, but you probably knew that already."
-```
+- **Database Access**
+  - Thread-safe connections
+  - Short-lived connections for operations
+  - Connection pooling for efficiency
 
-### Episodic Memory
-Remembers your conversations and interactions
-```
-"Last time we talked about website design. You seemed to prefer minimalist designs, though your taste is questionable."
-```
+### Configuration Parameters
 
-### Dreaming
-Develops insights about your preferences and patterns, providing the single most relevant insight for any query
-```
-"I've noticed you tend to break down problems systematically. Not a bad approach, for a human."
-```
+- **Detection Thresholds**
+  - confidence_threshold: 0.5
+  - detection_threshold: 0.3
+  - similarity_threshold: 0.6
 
-## How to Use F.R.E.D.
+- **Tracking Parameters**
+  - max_tracker_age: 60 frames
+  - history_length: 30 frames
+  - max_detected_objects: 3
 
-### Basic Commands
+- **Embedding Parameters**
+  - embedding_frame_interval: 5
+  - min_embedding_interval: 0.2 seconds
 
-Simply talk to F.R.E.D. as you would any assistant. Some examples:
+## Usage Examples
 
-**General Questions**
-```
-You: Tell me about quantum computing.
-F.R.E.D.: *explains quantum computing with a hint of condescension*
-```
-
-**Web Searches**
-```
-You: Search for the latest news about AI.
-F.R.E.D.: *finds and summarizes news, possibly with commentary*
-```
-
-**Vision Queries**
-```
-You: What objects can you see?
-F.R.E.D.: *describes objects detected in the camera view with characteristic dry wit*
-```
-
-**Managing Tasks**
-```
-You: Add a task to call my dentist tomorrow with a due date next Friday.
-F.R.E.D.: Added "Call dentist" to your tasks with a due date of Friday. Try not to forget this time.
-```
-
-### Available Tools
-
-F.R.E.D. can help you with:
-
-- **Web Information**: Finding and summarizing current information from the internet
-- **Memory Access**: Retrieving past conversations, facts, and insights from F.R.E.D.'s memory databases
-- **Notes**: Creating and managing notes
-- **Tasks**: Tracking your to-do list with due dates (old tasks are automatically cleaned up)
-- **System Status**: Monitoring your computer's performance
-- **Vision**: Identifying and describing objects through the webcam
+### Vision Commands
+- Identify face: "/identify [name]"
+- List known faces: "/faces"
+- Object detection: "What do you see?"
 
 ### Memory Management
+- Query memories: "What do you remember about..."
+- Forget conversations: "Forget our discussion about..."
+- End sessions: "Goodbye"
 
-F.R.E.D. automatically manages memories, but you can:
+### Task Management
+- Add task: "Add task [description]"
+- List tasks: "Show my tasks"
+- Delete task: "Delete task [id]"
 
-- Ask what F.R.E.D. remembers about specific topics
-- Request to forget certain conversations
-- Say "goodbye" at the end of sessions to ensure memories are processed
-- Access memory databases with specific queries (e.g., "What do you remember about our discussions on programming?")
+## Future Development Roadmap
 
-## Tips for Getting the Most Out of F.R.E.D.
+### Vision System Enhancements
+- Multi-camera support
+- Advanced motion analysis
+- Gesture recognition
+- Enhanced text recognition
+- Document scanning capabilities
 
-1. **Be specific** with your questions
-2. **End conversations** with "goodbye" so F.R.E.D. can process memories
-3. **Don't take it personally** when F.R.E.D. is a bit rude - it's in the name
-4. **Use the tools** for organizing information and tasks
-5. **Trust the automatic task management** - tasks older than 3 days past their due date are automatically cleaned up on startup
-6. **Provide feedback** when F.R.E.D. misunderstands you
-7. **Ask about your surroundings** to leverage the vision system
+### Memory System Improvements
+- Contextual memory linking
+- Memory prioritization
+- Automatic memory organization
+- Memory visualization tools
 
-## Common Commands
+### Integration Features
+- Smart home device control
+- Calendar integration
+- Email management
+- Document processing
 
-| What You Want | What to Say |
-|---------------|-------------|
-| Search the web | "Search for..." or "Find information about..." |
-| Access F.R.E.D.'s memories | "What do you remember about..." or "Recall our discussions on..." |
-| Create a note | "Create a note titled..." |
-| Add a task | "Add a task..." |
-| Add a task with due date | "Add a task... with due date..." |
-| List your tasks | "List my tasks" or "Show my tasks" |
-| Delete a task | "Delete task..." |
-| Check system status | "How's my system doing?" |
-| Check what F.R.E.D. can see | "What do you see?" or "What objects are in view?" |
-| End a session | "Goodbye" |
+### Performance Optimizations
+- GPU acceleration
+- Model quantization
+- Asynchronous processing
+- Memory-efficient caching
 
----
+## Technical Specifications
 
-F.R.E.D. gets better the more you use it. Despite the attitude, it's here to help. 
+### Dependencies
+- Python 3.8+
+- PyTorch
+- OpenCV
+- SQLite3
+- NumPy
+- face_recognition library
+
+### System Requirements
+- Minimum 4GB RAM
+- Webcam support
+- Python environment
+- CUDA support (optional for GPU acceleration)
