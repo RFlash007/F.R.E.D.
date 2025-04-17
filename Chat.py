@@ -20,9 +20,17 @@ import os
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import pipeline
+import EmotionIntegration
 
 # Move voice_queue to a new file called shared_resources.py
 from shared_resources import voice_queue
+
+# Ensure EmotionIntegration is initialized at startup
+try:
+    EmotionIntegration.initialize_emotion_detection()
+    print("Emotion detection system initialized successfully.")
+except Exception as e:
+    print(f"Error initializing emotion detection: {str(e)}")
 
 
 def route_query(query: str) -> str:
@@ -206,6 +214,15 @@ def process_message(user_input, ui_instance=None):
     # Use the standard recall method for dreams - always returning the best single match
     dreams = Dreaming.recall_dreams(user_input, top_k=1)
     
+    # Get emotion with error handling
+    try:
+        emotion, confidence = EmotionIntegration.get_emotion(user_input)
+        emotion_text = f"The detected emotion is: {emotion} (confidence: {confidence:.4f})"
+    except Exception as e:
+        logger.error(f"Error in emotion detection: {str(e)}")
+        emotion = None
+        emotion_text = "The emotion detection failed."
+    
     elapsed_time = datetime.now() - start_time
     # Removed print statement for memory recall time
     
@@ -239,6 +256,7 @@ def process_message(user_input, ui_instance=None):
         f"These are your memories that may help answer the user's question. Reference them only if directly helpful:\n{episodic_memories}\n\n"
         f"Here are facts from your memory. Reference them only if directly helpful:\n{semantic_memories}\n"
         f"These are your dreams and insights. Reference them only if directly helpful:\n{dreams}\n"
+        f"{emotion_text}\n"
     )
     
     user_prompt += "(END OF FRED DATABASE)"
@@ -521,6 +539,7 @@ def process_message(user_input, ui_instance=None):
                 f"These are your memories that may help answer the user's question. Reference them only if directly helpful:\n{episodic_memories}\n\n"
                 f"Here are facts from your memory. Reference them only if directly helpful:\n{semantic_memories}\n"
                 f"These are your dreams and insights. Reference them only if directly helpful:\n{dreams}\n"
+                f"{emotion_text}\n"
                 "(END OF FRED DATABASE)"
             )
             conversation.pop()
@@ -671,40 +690,34 @@ if __name__ == "__main__":
     
     print(f"Initialization took: {datetime.now() - time_start}")
 
-    # Define modelfile.
-    modelfile_14b = f'''
-FROM huihui_ai/qwen2.5-abliterate:14b
-SYSTEM {final_prompt}
-PARAMETER num_ctx 8192
-'''
-
-    # Load vision system prompt from file
-    vision_prompt_file = "vision_prompt.txt"
+    # Load system prompts and create models
     try:
-        with open(vision_prompt_file, 'r') as f:
-            vision_prompt = f.read()
-            vision_prompt = vision_prompt.replace('\n', ' ')  # Format for modelfile
-    except Exception as e:
-        print(f"Error loading vision prompt file: {str(e)}")
-        vision_prompt = "Describe the image with neutral, detailed precision."
-
-    # Define vision modelfile
-    modelfile_vision = f'''
-FROM llama3.2-vision:latest
-SYSTEM {vision_prompt}
-PARAMETER num_ctx 4096
-'''
-
-    try:
-        # Create the FRED model with modelfile
-        ollama.create(model='FRED_14b', modelfile=modelfile_14b)
+        # Load vision prompt
+        try:
+            with open("vision_prompt.txt", 'r') as f:
+                vision_prompt = f.read().replace('\n', ' ')
+        except:
+            vision_prompt = "Describe the image with neutral, detailed precision."
+            
+        # Create models directly using ollama Python API
+        print("Creating FRED_14b model...")
+        ollama.create(
+            model='FRED_14b', 
+            from_='huihui_ai/qwen2.5-abliterate:14b',
+            system=final_prompt,
+            parameters={"num_ctx": 4096}
+        )
         
-        # Create the vision model with modelfile
         print("Creating vision model...")
-        ollama.create(model='FRED_vision', modelfile=modelfile_vision)
-        print("Vision model created successfully")
+        ollama.create(
+            model='FRED_vision',
+            from_='llama3.2-vision:latest',
+            system=vision_prompt,
+            parameters={"num_ctx": 4096}
+        )
         
-        # Start the main chat loop.
+        # Start chat
         chat_loop()
     except Exception as e:
         print(f"Error initializing FRED: {str(e)}")
+        sys.exit(1)
